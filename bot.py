@@ -3245,28 +3245,6 @@ async def fourwords_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             f"🛑 Type <code>/4words stop</code> to end game."
         )
         await update.message.reply_text(text, parse_mode='HTML')
-
-async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends an inline button to open the Cultivation Telegram Mini App."""
-    if not update.message:
-        return
-    user = update.message.from_user
-    if user:
-        track_user_data(user)
-
-    base_url = os.getenv("RENDER_EXTERNAL_URL") or f"http://127.0.0.1:{os.getenv('PORT', '8080')}"
-    web_app_url = base_url.rstrip("/") + "/"
-
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
-    ])
-
-    await update.message.reply_text(
-        "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
-        "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
-        reply_markup=keyboard,
-        parse_mode='HTML'
-    )
         return
 
     # Start a new game
