@@ -9,6 +9,7 @@ import logging
 import re
 import threading
 import urllib.request
+import math
 import pymongo
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import List, Dict, Set, Optional
@@ -1394,6 +1395,282 @@ async def inventory_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         parse_mode='HTML'
     )
 
+# ==================== MINES BETTING GAME ====================
+active_mines_games: Dict[int, Dict] = {}  # user_id -> game_state
+
+def calculate_mines_multiplier(total_tiles: int, mines: int, opened: int) -> float:
+    if opened <= 0:
+        return 1.00
+    safe_tiles = total_tiles - mines
+    if opened > safe_tiles:
+        opened = safe_tiles
+    prod = 1.0
+    for i in range(opened):
+        prod *= (total_tiles - i) / (safe_tiles - i)
+    return round(prod * 0.97, 2)
+
+async def mine_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Starts a Mines betting game where user bets Spirit Stones and avoids hidden mines."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    eco = get_user_economy(user.id)
+
+    args = context.args or []
+    if len(args) < 2:
+        await update.message.reply_text(
+            "⚠️ <b>Usage:</b> <code>/mine &lt;bet_ss&gt; &lt;mines_count&gt;</code>\n"
+            "• <b>Min Bet:</b> <code>50 SS</code>\n"
+            "• <b>Mines Range:</b> <code>1 to 24</code> (out of 25 tiles)\n"
+            "<i>Example:</i> <code>/mine 50 3</code> (Bet 50 SS with 3 mines)",
+            parse_mode='HTML'
+        )
+        return
+
+    try:
+        bet = int(args[0])
+        mines_count = int(args[1])
+    except ValueError:
+        await update.message.reply_text("❌ Bet amount and mines count must be valid numbers!", parse_mode='HTML')
+        return
+
+    if bet < 50:
+        await update.message.reply_text("❌ Minimum bet for Mines is <b>50 SS</b>!", parse_mode='HTML')
+        return
+
+    if eco["spirit_stones"] < bet:
+        await update.message.reply_text(
+            f"❌ <b>Insufficient Spirit Stones!</b>\n"
+            f"• Your Balance: <code>{eco['spirit_stones']} SS</code>\n"
+            f"• Attempted Bet: <code>{bet} SS</code>",
+            parse_mode='HTML'
+        )
+        return
+
+    if mines_count < 1 or mines_count > 24:
+        await update.message.reply_text("❌ Mines count must be between <b>1 and 24</b>!", parse_mode='HTML')
+        return
+
+    # Deduct bet
+    eco["spirit_stones"] -= bet
+    save_user_economy(user_economy_db)
+
+    # Initialize game state
+    mine_positions = set(random.sample(range(25), mines_count))
+    game_state = {
+        "user_id": user.id,
+        "bet": bet,
+        "mines_count": mines_count,
+        "mine_positions": mine_positions,
+        "revealed": set(),
+        "tiles_opened": 0,
+        "game_over": False,
+        "cashed_out": False
+    }
+    active_mines_games[user.id] = game_state
+
+    # Build 5x5 keyboard
+    keyboard = build_mines_keyboard(game_state)
+    uname = escape_html(user.first_name)
+
+    text = (
+        f"💣 <b>MINES GAME STARTED: {uname}</b> 💎\n\n"
+        f"💰 <b>Bet:</b> <code>{bet} SS</code>\n"
+        f"⛏️ <b>Mines:</b> <code>{mines_count}</code> | <b>Safe Tiles:</b> <code>{25 - mines_count}</code>\n"
+        f"📈 <b>Current Multiplier:</b> <code>1.00x</code>\n"
+        f"💎 <b>Potential Winnings:</b> <code>{bet} SS</code>\n\n"
+        f"👇 <i>Tap tiles below to uncover safe diamonds and increase your multiplier!</i>"
+    )
+
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
+
+def build_mines_keyboard(game_state: Dict) -> InlineKeyboardMarkup:
+    revealed = game_state["revealed"]
+    game_over = game_state["game_over"]
+    mine_positions = game_state["mine_positions"]
+
+    buttons = []
+    for row in range(5):
+        row_buttons = []
+        for col in range(5):
+            idx = row * 5 + col
+            if idx in revealed:
+                label = "💎"
+                callback = "mines_noop"
+            elif game_over:
+                if idx in mine_positions:
+                    label = "💣"
+                else:
+                    label = "🟩"
+                callback = "mines_noop"
+            else:
+                label = "🟦"
+                callback = f"mines_click_{idx}"
+            row_buttons.append(InlineKeyboardButton(label, callback_data=callback))
+        buttons.append(row_buttons)
+
+    if not game_over:
+        current_mult = calculate_mines_multiplier(25, game_state["mines_count"], game_state["tiles_opened"])
+        potential = int(game_state["bet"] * current_mult)
+        if game_state["tiles_opened"] > 0:
+            buttons.append([
+                InlineKeyboardButton(f"💰 Cash Out ({potential} SS @ {current_mult}x)", callback_data="mines_cashout"),
+                InlineKeyboardButton("🛑 Surrender", callback_data="mines_surrender")
+            ])
+        else:
+            buttons.append([
+                InlineKeyboardButton("🛑 Surrender / Quit", callback_data="mines_surrender")
+            ])
+    else:
+        buttons.append([
+            InlineKeyboardButton("🎮 Play Again (/mine)", callback_data="mines_playagain")
+        ])
+
+    return InlineKeyboardMarkup(buttons)
+
+async def mines_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.from_user:
+        return
+
+    user = query.from_user
+    user_id = user.id
+    data = query.data or ""
+    game_state = active_mines_games.get(user_id)
+
+    if not game_state:
+        await query.answer("⚠️ No active Mines game found! Type /mine <bet> <mines> to start a new game.", show_alert=True)
+        return
+
+    uname = escape_html(user.first_name)
+
+    if data == "mines_noop":
+        await query.answer("Tile already opened or game ended!", show_alert=False)
+        return
+
+    if data == "mines_playagain":
+        active_mines_games.pop(user_id, None)
+        await query.edit_message_text(
+            "🎮 <b>Mines Game Closed.</b>\nType <code>/mine &lt;bet_ss&gt; &lt;mines_count&gt;</code> to play again!",
+            parse_mode='HTML'
+        )
+        return
+
+    if game_state["game_over"]:
+        await query.answer("Game is already over!", show_alert=True)
+        return
+
+    if data.startswith("mines_click_"):
+        idx = int(data.replace("mines_click_", ""))
+        if idx in game_state["revealed"]:
+            await query.answer("Tile already revealed!", show_alert=True)
+            return
+
+        if idx in game_state["mine_positions"]:
+            game_state["game_over"] = True
+            bet = game_state["bet"]
+            active_mines_games.pop(user_id, None)
+
+            keyboard = build_mines_keyboard(game_state)
+            text = (
+                f"💣 <b>BOOM! YOU HIT A MINE!</b> 💀\n\n"
+                f"👤 <b>Cultivator:</b> {uname}\n"
+                f"💰 <b>Bet Lost:</b> <code>-{bet} SS</code>\n"
+                f"⛏️ <b>Mines:</b> <code>{game_state['mines_count']}</code> | <b>Tiles Opened:</b> <code>{game_state['tiles_opened']}</code>\n\n"
+                f"<i>Better luck next time! Type /mine to try again.</i>"
+            )
+            await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+            await query.answer("BOOM! You hit a mine!", show_alert=True)
+            return
+
+        game_state["revealed"].add(idx)
+        game_state["tiles_opened"] += 1
+        tiles_opened = game_state["tiles_opened"]
+        safe_total = 25 - game_state["mines_count"]
+
+        current_mult = calculate_mines_multiplier(25, game_state["mines_count"], tiles_opened)
+        potential = int(game_state["bet"] * current_mult)
+
+        if tiles_opened == safe_total:
+            game_state["game_over"] = True
+            winnings = potential
+            eco = get_user_economy(user_id)
+            eco["spirit_stones"] += winnings
+            save_user_economy(user_economy_db)
+            active_mines_games.pop(user_id, None)
+
+            keyboard = build_mines_keyboard(game_state)
+            text = (
+                f"🏆 <b>JACKPOT! ALL SAFE TILES CLEARED!</b> 🔥\n\n"
+                f"👤 <b>Cultivator:</b> {uname}\n"
+                f"💰 <b>Bet:</b> <code>{game_state['bet']} SS</code>\n"
+                f"📈 <b>Multiplier:</b> <code>{current_mult}x</code>\n"
+                f"💎 <b>Winnings Won:</b> <code>+{winnings} SS</code>\n"
+                f"💰 <b>New Balance:</b> <code>{eco['spirit_stones']} SS</code>",
+                parse_mode='HTML'
+            )
+            await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+            await query.answer(f"Jackpot! Won {winnings} SS!", show_alert=True)
+            return
+
+        keyboard = build_mines_keyboard(game_state)
+        text = (
+            f"💣 <b>MINES GAME IN PROGRESS: {uname}</b> 💎\n\n"
+            f"💰 <b>Bet:</b> <code>{game_state['bet']} SS</code>\n"
+            f"⛏️ <b>Mines:</b> <code>{game_state['mines_count']}</code> | <b>Opened:</b> <code>{tiles_opened}/{safe_total}</code>\n"
+            f"📈 <b>Current Multiplier:</b> <code>{current_mult}x</code>\n"
+            f"💎 <b>Potential Winnings:</b> <code>{potential} SS</code>\n\n"
+            f"👇 <i>Keep tapping safe tiles or Cash Out!</i>"
+        )
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+        await query.answer(f"Safe! Multiplier: {current_mult}x", show_alert=False)
+        return
+
+    if data == "mines_cashout":
+        if game_state["tiles_opened"] <= 0:
+            await query.answer("Open at least 1 safe tile before cashing out!", show_alert=True)
+            return
+
+        game_state["game_over"] = True
+        current_mult = calculate_mines_multiplier(25, game_state["mines_count"], game_state["tiles_opened"])
+        winnings = int(game_state["bet"] * current_mult)
+
+        eco = get_user_economy(user_id)
+        eco["spirit_stones"] += winnings
+        save_user_economy(user_economy_db)
+        active_mines_games.pop(user_id, None)
+
+        keyboard = build_mines_keyboard(game_state)
+        text = (
+            f"💰 <b>CASH OUT SUCCESSFUL!</b> 🎉\n\n"
+            f"👤 <b>Cultivator:</b> {uname}\n"
+            f"📈 <b>Multiplier:</b> <code>{current_mult}x</code>\n"
+            f"💎 <b>Winnings Claimed:</b> <code>+{winnings} SS</code>\n"
+            f"💰 <b>New Balance:</b> <code>{eco['spirit_stones']} SS</code>\n\n"
+            f"<i>Type /mine to play again!</i>"
+        )
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+        await query.answer(f"Cashed out successfully: {winnings} SS!", show_alert=True)
+        return
+
+    if data == "mines_surrender":
+        game_state["game_over"] = True
+        bet = game_state["bet"]
+        active_mines_games.pop(user_id, None)
+
+        keyboard = build_mines_keyboard(game_state)
+        text = (
+            f"🛑 <b>GAME SURRENDERED!</b>\n\n"
+            f"👤 <b>Cultivator:</b> {uname}\n"
+            f"💰 <b>Bet Forfeited:</b> <code>-{bet} SS</code>\n\n"
+            f"<i>Type /mine to start a new game.</i>"
+        )
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+        await query.answer("Game surrendered.", show_alert=True)
+        return
+
 async def myprofile_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Displays user's cultivation game profile, Spirit Stones, roster count, unique cards collected, and completion %."""
     if not update.message or not update.message.from_user:
@@ -2749,12 +3026,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 hint_display = result["hint_display"]
                 uname = escape_html(sender_name)
 
+                eco = get_user_economy(user.id)
+                eco["spirit_stones"] += 100
+                save_user_economy(user_economy_db)
+                new_ss_bal = eco["spirit_stones"]
+
                 text = (
                     f"🎉 <b>CONGRATULATIONS {uname}! YOU WON!</b> 🏆\n\n"
                     f"<b>4-letter mode</b>\n"
                     f"<i>{tries}/30 guesses</i>\n\n"
                     f"{hint_display}\n\n"
                     f"🎯 Secret Word: <b>{secret}</b>\n"
+                    f"💎 <b>Reward Received:</b> <code>+100 Spirit Stones (SS)</code>\n"
+                    f"💰 <b>New SS Balance:</b> <code>{new_ss_bal} SS</code>\n\n"
                     f"Type <code>/4words</code> to start a new game!"
                 )
                 await message.reply_text(text, parse_mode='HTML')
@@ -3058,6 +3342,8 @@ def main():
     app.add_handler(CommandHandler("inventory", inventory_command))
     app.add_handler(CommandHandler("myprofile", myprofile_command))
     app.add_handler(CommandHandler("profile", myprofile_command))
+    app.add_handler(CommandHandler("mine", mine_command))
+    app.add_handler(CommandHandler("mines", mine_command))
     app.add_handler(CommandHandler("cultivate", cultivate_command))
     app.add_handler(CommandHandler("addcard", addcard_command))
     app.add_handler(CommandHandler("offer", offer_command))
@@ -3070,6 +3356,7 @@ def main():
     # Callback Queries Handler (For /addcard Wizard & Cultivation Inline Buttons)
     app.add_handler(CallbackQueryHandler(addcard_callback_handler, pattern="^addcard_"))
     app.add_handler(CallbackQueryHandler(pill_cultivate_callback_handler, pattern="^(buy_pill_|cult_|open_pillshop)"))
+    app.add_handler(CallbackQueryHandler(mines_callback_handler, pattern="^mines_"))
 
     # Photo Messages Handler (For /addcard Wizard Photo Upload)
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
