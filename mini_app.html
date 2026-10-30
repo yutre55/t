@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cultivation Cult Mini App</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        .glow {
+            box-shadow: 0 0 20px rgba(168, 85, 247, 0.4);
+        }
+    </style>
+</head>
+<body class="p-4 max-w-md mx-auto min-h-screen flex flex-col justify-between">
+    <div>
+        <!-- Header -->
+        <header class="text-center py-6">
+            <h1 class="text-3xl font-extrabold bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
+                ⛩️ Cultivation Cult
+            </h1>
+            <p id="user-greeting" class="text-sm text-slate-400 mt-1">Welcome, Cultivator!</p>
+        </header>
+
+        <!-- Stats Card -->
+        <div class="bg-slate-800/80 border border-slate-700 rounded-2xl p-5 mb-6 glow">
+            <div class="flex justify-between items-center mb-4">
+                <span class="text-slate-400 text-sm font-medium">Spirit Stones (SS)</span>
+                <span id="ss-balance" class="text-2xl font-bold text-amber-400">💎 0 SS</span>
+            </div>
+            <div class="grid grid-cols-2 gap-3 pt-3 border-t border-slate-700">
+                <div class="bg-slate-900/50 p-3 rounded-xl text-center">
+                    <span class="block text-xs text-slate-400">Roster Cards</span>
+                    <span id="roster-count" class="text-lg font-bold text-purple-300">0</span>
+                </div>
+                <div class="bg-slate-900/50 p-3 rounded-xl text-center">
+                    <span class="block text-xs text-slate-400">Game Status</span>
+                    <span class="text-lg font-bold text-emerald-400">Active 🟢</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="space-y-3 mb-6">
+            <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Quick Actions</h2>
+            <button onclick="triggerCommand('/myprofile')" class="w-full bg-gradient-to-r from-purple-600 to-indigo-600 font-semibold py-3 px-4 rounded-xl shadow-lg hover:opacity-90 transition">
+                📊 View Full Profile (/myprofile)
+            </button>
+            <button onclick="triggerCommand('/pillshop')" class="w-full bg-gradient-to-r from-indigo-600 to-blue-600 font-semibold py-3 px-4 rounded-xl shadow-lg hover:opacity-90 transition">
+                pillshop Pill Shop (/pillshop)
+            </button>
+            <button onclick="triggerCommand('/mine 50 3')" class="w-full bg-gradient-to-r from-emerald-600 to-teal-600 font-semibold py-3 px-4 rounded-xl shadow-lg hover:opacity-90 transition">
+                💣 Play Mines Game (/mine)
+            </button>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="text-center py-4 text-xs text-slate-500">
+        Powered by Sylvi Groq AI Bot • Telegram Mini App
+    </footer>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        // Display user name if available
+        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+            const user = tg.initDataUnsafe.user;
+            document.getElementById('user-greeting').innerText = `Welcome, ${user.first_name || 'Cultivator'}!`;
+        }
+
+        function triggerCommand(cmd) {
+            if (tg.sendData) {
+                tg.sendData(cmd);
+            } else {
+                alert(`Command: ${cmd}`);
+            }
+        }
+    </script>
+</body>
+</html>

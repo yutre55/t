@@ -14,8 +14,8 @@ import pymongo
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import List, Dict, Set, Optional
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent, WebAppInfo
+from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, InlineQueryHandler, filters, ContextTypes
 from openai import AsyncOpenAI
 
 # Setup logging
@@ -1055,6 +1055,28 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     await update.message.reply_text(text, parse_mode='HTML')
 
+async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends an inline button to open the Cultivation Telegram Mini App."""
+    if not update.message:
+        return
+    user = update.message.from_user
+    if user:
+        track_user_data(user)
+
+    base_url = os.getenv("RENDER_EXTERNAL_URL") or f"http://127.0.0.1:{os.getenv('PORT', '8080')}"
+    web_app_url = base_url.rstrip("/") + "/"
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
+    ])
+
+    await update.message.reply_text(
+        "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
+        "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
+        reply_markup=keyboard,
+        parse_mode='HTML'
+    )
+
 async def summon_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Summons a random card drop in group chat with tier probabilities."""
     if not update.message or not update.message.from_user:
@@ -1136,6 +1158,31 @@ async def summon_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     await update.message.reply_text(text)
 
+def get_tier_menu_view(page: int = 0, time_filter: str = "all") -> Tuple[str, InlineKeyboardMarkup]:
+    text = (
+        f"🎴 <b>SORT ROSTER BY TIER</b>\n\n"
+        f"Select a rarity tier below to filter your cards:"
+    )
+
+    keyboard_rows = [
+        [
+            InlineKeyboardButton("🌐 All Tiers", callback_data=f"mycards_p_0_All_{time_filter}"),
+            InlineKeyboardButton("⚪ Mortal", callback_data=f"mycards_p_0_Mortal_{time_filter}")
+        ],
+        [
+            InlineKeyboardButton("🟢 Awakened", callback_data=f"mycards_p_0_Awakened_{time_filter}"),
+            InlineKeyboardButton("🔵 Transcendent", callback_data=f"mycards_p_0_Transcendent_{time_filter}")
+        ],
+        [
+            InlineKeyboardButton("🟣 Celestial", callback_data=f"mycards_p_0_Celestial_{time_filter}"),
+            InlineKeyboardButton("🔥 Primordial", callback_data=f"mycards_p_0_Primordial_{time_filter}")
+        ],
+        [
+            InlineKeyboardButton("🔙 Back to Roster", callback_data=f"mycards_p_{page}_All_{time_filter}")
+        ]
+    ]
+    return text, InlineKeyboardMarkup(keyboard_rows)
+
 def get_user_roster_view(user_id: int, page: int = 0, tier_filter: str = "All", time_filter: str = "all") -> Tuple[str, Optional[InlineKeyboardMarkup]]:
     clean_expired_cards()
     user_cards = [c for c in user_cards_db.values() if c.get("owner_id") == user_id]
@@ -1178,9 +1225,9 @@ def get_user_roster_view(user_id: int, page: int = 0, tier_filter: str = "All", 
 
     cards_str = "\n".join(lines) if lines else "<i>No cards match current filter.</i>"
 
-    filter_info = f" | Filter: <b>{tier_filter}</b>" if tier_filter != "All" else ""
+    filter_info = f" | Tier: <b>{tier_filter}</b>" if tier_filter != "All" else ""
     if time_filter == "24h":
-        filter_info += " | ⏱️ Expiring < 24h"
+        filter_info += " | ⏱️ < 24h"
 
     text = (
         f"📜 <b>Your Cultivation Roster</b> (Page {page+1}/{total_pages} | Total: {total_cards}{filter_info}):\n\n"
@@ -1199,23 +1246,12 @@ def get_user_roster_view(user_id: int, page: int = 0, tier_filter: str = "All", 
         nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"mycards_p_{page+1}_{tier_filter}_{time_filter}"))
     keyboard_rows.append(nav_buttons)
 
-    # Filter Tiers row 1
-    keyboard_rows.append([
-        InlineKeyboardButton("🌐 All", callback_data=f"mycards_p_0_All_{time_filter}"),
-        InlineKeyboardButton("⚪ Mortal", callback_data=f"mycards_p_0_Mortal_{time_filter}"),
-        InlineKeyboardButton("🟢 Awakened", callback_data=f"mycards_p_0_Awakened_{time_filter}")
-    ])
-    # Filter Tiers row 2
-    keyboard_rows.append([
-        InlineKeyboardButton("🔵 Transcendent", callback_data=f"mycards_p_0_Transcendent_{time_filter}"),
-        InlineKeyboardButton("🟣 Celestial", callback_data=f"mycards_p_0_Celestial_{time_filter}"),
-        InlineKeyboardButton("🔥 Primordial", callback_data=f"mycards_p_0_Primordial_{time_filter}")
-    ])
-
-    # Time filter row
-    time_label = "⏱️ Show All Time" if time_filter == "24h" else "⏱️ Filter < 24h Expiring"
+    # Action buttons row: Sort by Tier & Time Filter
+    time_label = "⏱️ Time: All" if time_filter == "all" else "⏱️ Time: < 24h"
     next_time_filter = "all" if time_filter == "24h" else "24h"
+
     keyboard_rows.append([
+        InlineKeyboardButton(f"🗂️ Sort by Tier ({tier_filter})", callback_data=f"mycards_menu_tiers_{page}_{time_filter}"),
         InlineKeyboardButton(time_label, callback_data=f"mycards_p_0_{tier_filter}_{next_time_filter}")
     ])
 
@@ -1241,6 +1277,23 @@ async def mycards_callback_handler(update: Update, context: ContextTypes.DEFAULT
 
     if data == "mycards_noop":
         await query.answer("Current page", show_alert=False)
+        return
+
+    if data.startswith("mycards_menu_tiers_"):
+        parts = data.split("_")
+        if len(parts) >= 5:
+            try:
+                page = int(parts[3])
+                time_filter = parts[4]
+            except ValueError:
+                page = 0
+                time_filter = "all"
+            text, keyboard = get_tier_menu_view(page, time_filter)
+            try:
+                await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+            except Exception as e:
+                logger.warning(f"Could not update tier menu: {e}")
+            await query.answer()
         return
 
     if data.startswith("mycards_p_"):
@@ -1301,6 +1354,96 @@ async def showcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             logger.warning(f"Could not send card photo: {e}")
 
     await update.message.reply_text(text, parse_mode='HTML')
+
+async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends an inline button to open the Cultivation Telegram Mini App."""
+    if not update.message:
+        return
+    user = update.message.from_user
+    if user:
+        track_user_data(user)
+
+    base_url = os.getenv("RENDER_EXTERNAL_URL") or f"http://127.0.0.1:{os.getenv('PORT', '8080')}"
+    web_app_url = base_url.rstrip("/") + "/"
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
+    ])
+
+    await update.message.reply_text(
+        "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
+        "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
+        reply_markup=keyboard,
+        parse_mode='HTML'
+    )
+
+async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles inline queries (@botusername <card_name>) to search who owns specific cards."""
+    inline_query = update.inline_query
+    if not inline_query:
+        return
+
+    query_text = inline_query.query.strip().lower()
+    clean_expired_cards()
+
+    results = []
+    matched_cards = []
+    for code, card in user_cards_db.items():
+        c_name = card.get("name", "").lower()
+        if not query_text or query_text in c_name:
+            matched_cards.append((code, card))
+
+    for code, card in matched_cards[:20]:
+        owner_id = card.get("owner_id")
+        owner_info = users_db.get(str(owner_id), {})
+        owner_name = owner_info.get("first_name", f"User {owner_id}")
+        owner_handle = f"@{owner_info.get('username')}" if owner_info.get("username") else owner_name
+
+        c_name = card.get("name", "Cultivator")
+        tier = card.get("tier", "Mortal")
+        tier_emoji = TIER_EMOJIS.get(tier, tier)
+        worth = get_card_worth(card)
+        stay_time = format_time_left(card)
+
+        title = f"🎴 {c_name} [{tier}]"
+        description = f"Owner: {owner_handle} | Worth: {worth} SS | Code: {code}"
+
+        content_text = (
+            f"🎴 <b>CARD OWNERSHIP SEARCH RESULT</b>\n\n"
+            f"⚔️ <b>Name:</b> {escape_html(c_name)}\n"
+            f"✨ <b>Tier:</b> {tier_emoji}\n"
+            f"💎 <b>Worth:</b> <code>{worth} SS</code>\n"
+            f"⏳ <b>Stay Time:</b> <code>{stay_time}</code>\n"
+            f"🔑 <b>Code:</b> <code>{code}</code>\n"
+            f"👤 <b>Owner:</b> {escape_html(owner_name)} ({escape_html(owner_handle)})"
+        )
+
+        results.append(
+            InlineQueryResultArticle(
+                id=code,
+                title=title,
+                description=description,
+                input_message_content=InputTextMessageContent(
+                    content_text,
+                    parse_mode="HTML"
+                )
+            )
+        )
+
+    if not results and query_text:
+        results.append(
+            InlineQueryResultArticle(
+                id="no_result",
+                title="❌ No cards found",
+                description=f"No cards matching '{query_text}' found in any user roster.",
+                input_message_content=InputTextMessageContent(
+                    f"❌ No cards matching '<b>{escape_html(query_text)}</b>' found in any active user roster.",
+                    parse_mode="HTML"
+                )
+            )
+        )
+
+    await inline_query.answer(results, cache_time=5)
 
 async def daily_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Claims daily free 500 Spirit Stones (SS) + 1 Mortal Card."""
@@ -1804,6 +1947,28 @@ async def myprofile_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     await update.message.reply_text(text, parse_mode='HTML')
 
+async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends an inline button to open the Cultivation Telegram Mini App."""
+    if not update.message:
+        return
+    user = update.message.from_user
+    if user:
+        track_user_data(user)
+
+    base_url = os.getenv("RENDER_EXTERNAL_URL") or f"http://127.0.0.1:{os.getenv('PORT', '8080')}"
+    web_app_url = base_url.rstrip("/") + "/"
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
+    ])
+
+    await update.message.reply_text(
+        "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
+        "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
+        reply_markup=keyboard,
+        parse_mode='HTML'
+    )
+
 async def cultivate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Feeds pill to card to extend stay duration or make permanent, with inline selection."""
     if not update.message or not update.message.from_user:
@@ -1951,6 +2116,28 @@ async def finalize_add_card(update: Update, user_id: int, tier: str, char_name: 
 
     if update.message:
         await update.message.reply_text(text, parse_mode='HTML')
+
+async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends an inline button to open the Cultivation Telegram Mini App."""
+    if not update.message:
+        return
+    user = update.message.from_user
+    if user:
+        track_user_data(user)
+
+    base_url = os.getenv("RENDER_EXTERNAL_URL") or f"http://127.0.0.1:{os.getenv('PORT', '8080')}"
+    web_app_url = base_url.rstrip("/") + "/"
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
+    ])
+
+    await update.message.reply_text(
+        "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
+        "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
+        reply_markup=keyboard,
+        parse_mode='HTML'
+    )
 
 async def addcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Owner command to add a new character card using interactive wizard or direct args."""
@@ -2532,6 +2719,28 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     await update.message.reply_text(text, parse_mode='HTML')
 
+async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends an inline button to open the Cultivation Telegram Mini App."""
+    if not update.message:
+        return
+    user = update.message.from_user
+    if user:
+        track_user_data(user)
+
+    base_url = os.getenv("RENDER_EXTERNAL_URL") or f"http://127.0.0.1:{os.getenv('PORT', '8080')}"
+    web_app_url = base_url.rstrip("/") + "/"
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
+    ])
+
+    await update.message.reply_text(
+        "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
+        "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
+        reply_markup=keyboard,
+        parse_mode='HTML'
+    )
+
 async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Claims a card dropped via /summon or 100-msg group drop."""
     if not update.message or not update.message.from_user:
@@ -3036,6 +3245,28 @@ async def fourwords_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             f"🛑 Type <code>/4words stop</code> to end game."
         )
         await update.message.reply_text(text, parse_mode='HTML')
+
+async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends an inline button to open the Cultivation Telegram Mini App."""
+    if not update.message:
+        return
+    user = update.message.from_user
+    if user:
+        track_user_data(user)
+
+    base_url = os.getenv("RENDER_EXTERNAL_URL") or f"http://127.0.0.1:{os.getenv('PORT', '8080')}"
+    web_app_url = base_url.rstrip("/") + "/"
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
+    ])
+
+    await update.message.reply_text(
+        "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
+        "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
+        reply_markup=keyboard,
+        parse_mode='HTML'
+    )
         return
 
     # Start a new game
@@ -3048,6 +3279,28 @@ async def fourwords_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         f"🛑 Type <code>/4words stop</code> to end anytime."
     )
     await update.message.reply_text(text, parse_mode='HTML')
+
+async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends an inline button to open the Cultivation Telegram Mini App."""
+    if not update.message:
+        return
+    user = update.message.from_user
+    if user:
+        track_user_data(user)
+
+    base_url = os.getenv("RENDER_EXTERNAL_URL") or f"http://127.0.0.1:{os.getenv('PORT', '8080')}"
+    web_app_url = base_url.rstrip("/") + "/"
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
+    ])
+
+    await update.message.reply_text(
+        "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
+        "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
+        reply_markup=keyboard,
+        parse_mode='HTML'
+    )
 
 # ==================== MAIN MESSAGE HANDLER ====================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -3343,6 +3596,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path in ["/", "/app", "/webapp"]:
+            html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mini_app.html")
+            if os.path.exists(html_path):
+                try:
+                    with open(html_path, "rb") as f:
+                        content = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-type", "text/html; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(content)
+                    return
+                except Exception as e:
+                    logger.error(f"Error serving mini_app.html: {e}")
+
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
@@ -3395,6 +3662,7 @@ def main():
     app.add_handler(CommandHandler("start", help_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("status", status_command))
+    app.add_handler(CommandHandler("app", app_command))
     app.add_handler(CommandHandler("addapi", addapi_command))
     app.add_handler(CommandHandler("listapi", listapi_command))
     app.add_handler(CommandHandler("statsgc", statsgc_command))
@@ -3434,6 +3702,9 @@ def main():
     app.add_handler(CallbackQueryHandler(pill_cultivate_callback_handler, pattern="^(buy_pill_|cult_|open_pillshop)"))
     app.add_handler(CallbackQueryHandler(mines_callback_handler, pattern="^mines_"))
     app.add_handler(CallbackQueryHandler(mycards_callback_handler, pattern="^mycards_"))
+
+    # Inline Query Handler (For @botusername <card_name> card ownership search)
+    app.add_handler(InlineQueryHandler(inline_query_handler))
 
     # Photo Messages Handler (For /addcard Wizard Photo Upload)
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
