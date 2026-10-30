@@ -1608,8 +1608,7 @@ async def mines_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
                 f"💰 <b>Bet:</b> <code>{game_state['bet']} SS</code>\n"
                 f"📈 <b>Multiplier:</b> <code>{current_mult}x</code>\n"
                 f"💎 <b>Winnings Won:</b> <code>+{winnings} SS</code>\n"
-                f"💰 <b>New Balance:</b> <code>{eco['spirit_stones']} SS</code>",
-                parse_mode='HTML'
+                f"💰 <b>New Balance:</b> <code>{eco['spirit_stones']} SS</code>"
             )
             await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
             await query.answer(f"Jackpot! Won {winnings} SS!", show_alert=True)
