@@ -14,30 +14,65 @@
             overflow-x: hidden;
             min-height: 100vh;
         }
-        .glass {
-            background: rgba(15, 23, 42, 0.75);
+        .glass-3d {
+            background: rgba(15, 23, 42, 0.85);
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(168, 85, 247, 0.15);
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            border: 1px solid rgba(168, 85, 247, 0.3);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.15);
         }
-        .glass-card {
-            background: rgba(30, 41, 59, 0.5);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.05);
+        .card-3d {
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.95) 100%);
+            border: 1px solid rgba(168, 85, 247, 0.25);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6),
+                        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+                        0 0 20px rgba(168, 85, 247, 0.1);
+            transform: translateY(0);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .btn-3d {
+            background: linear-gradient(135deg, #9333ea 0%, #4f46e5 100%);
+            box-shadow: 0 6px 0 #3b0764, 0 10px 20px rgba(0, 0, 0, 0.4);
+            transform: translateY(0);
+            transition: all 0.1s ease;
+        }
+        .btn-3d:active {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0 #3b0764, 0 5px 10px rgba(0, 0, 0, 0.4);
+        }
+        .btn-emerald-3d {
+            background: linear-gradient(135deg, #059669 0%, #0d9488 100%);
+            box-shadow: 0 6px 0 #064e3b, 0 10px 20px rgba(0, 0, 0, 0.4);
+            transform: translateY(0);
+            transition: all 0.1s ease;
+        }
+        .btn-emerald-3d:active {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0 #064e3b, 0 5px 10px rgba(0, 0, 0, 0.4);
+        }
+        .tile-3d {
+            background: linear-gradient(135deg, #334155 0%, #1e293b 100%);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 6px 0 #0f172a, 0 8px 15px rgba(0, 0, 0, 0.4);
+            transform: translateY(0);
+            transition: all 0.1s ease;
+        }
+        .tile-3d:active:not(:disabled) {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0 #0f172a, 0 3px 5px rgba(0, 0, 0, 0.4);
         }
         .glow-purple {
-            box-shadow: 0 0 35px rgba(168, 85, 247, 0.2);
+            box-shadow: 0 0 35px rgba(168, 85, 247, 0.25);
         }
         .glow-amber {
-            box-shadow: 0 0 25px rgba(245, 158, 11, 0.2);
+            box-shadow: 0 0 25px rgba(245, 158, 11, 0.3);
         }
         .aura-blob {
             position: fixed;
-            width: 280px;
-            height: 280px;
-            background: linear-gradient(180deg, rgba(147, 51, 234, 0.15) 0%, rgba(219, 39, 119, 0.1) 100%);
-            filter: blur(80px);
+            width: 300px;
+            height: 300px;
+            background: linear-gradient(180deg, rgba(147, 51, 234, 0.2) 0%, rgba(219, 39, 119, 0.15) 100%);
+            filter: blur(90px);
             border-radius: 50%;
             z-index: -1;
             pointer-events: none;
@@ -52,16 +87,16 @@
     <div class="aura-blob -bottom-10 left-1/4"></div>
 
     <!-- Top Header -->
-    <header class="p-4 flex justify-between items-center glass sticky top-0 z-50 border-b border-purple-900/30">
+    <header class="p-4 flex justify-between items-center glass-3d sticky top-0 z-50 border-b border-purple-900/40">
         <div class="flex items-center space-x-3">
-            <div id="user-avatar" class="w-10 h-10 rounded-full bg-gradient-to-tr from-purple-600 via-fuchsia-600 to-pink-500 flex items-center justify-center font-extrabold text-white shadow-lg shadow-purple-900/50">⛩️</div>
+            <div id="user-avatar" class="w-11 h-11 rounded-2xl bg-gradient-to-tr from-purple-600 via-fuchsia-600 to-pink-500 flex items-center justify-center font-extrabold text-white shadow-xl shadow-purple-900/60 border border-white/20">⛩️</div>
             <div>
-                <h2 id="user-name" class="font-bold text-sm tracking-wide text-slate-100">Cultivator</h2>
-                <span class="text-[10px] text-purple-400 font-bold uppercase tracking-wider">Immortal Realm</span>
+                <h2 id="user-name" class="font-bold text-sm tracking-wide text-slate-100 drop-shadow">Cultivator</h2>
+                <span class="text-[10px] text-purple-300 font-bold uppercase tracking-wider">Immortal Realm</span>
             </div>
         </div>
-        <div class="bg-amber-500/10 border border-amber-500/30 px-3.5 py-1.5 rounded-full flex items-center space-x-1.5 glow-amber">
-            <span class="text-amber-400 text-xs font-bold">💎</span>
+        <div class="bg-amber-500/15 border border-amber-500/40 px-4 py-2 rounded-2xl flex items-center space-x-1.5 glow-amber shadow-lg">
+            <span class="text-amber-400 text-xs font-bold drop-shadow">💎</span>
             <span id="header-ss" class="text-amber-300 font-extrabold text-xs">0 SS</span>
         </div>
     </header>
@@ -72,44 +107,44 @@
         <!-- TAB 1: DASHBOARD -->
         <section id="tab-dashboard" class="tab-content space-y-4">
             <!-- Banner / Progress -->
-            <div class="glass rounded-2xl p-5 glow-purple relative overflow-hidden">
-                <div class="absolute -right-10 -bottom-10 w-32 h-32 bg-purple-500/20 rounded-full blur-3xl pointer-events-none"></div>
+            <div class="card-3d rounded-3xl p-5 glow-purple relative overflow-hidden">
+                <div class="absolute -right-10 -bottom-10 w-32 h-32 bg-purple-500/25 rounded-full blur-3xl pointer-events-none"></div>
                 <div class="flex justify-between items-center mb-3">
-                    <span class="text-xs text-slate-300 font-semibold">Game Completion</span>
-                    <span id="stat-completion" class="text-sm font-extrabold text-purple-400">0.0%</span>
+                    <span class="text-xs text-slate-200 font-bold uppercase tracking-wider">Game Completion</span>
+                    <span id="stat-completion" class="text-sm font-extrabold text-purple-300">0.0%</span>
                 </div>
                 <!-- Progress bar -->
-                <div class="w-full bg-slate-950/80 rounded-full h-3 p-0.5 border border-purple-500/30 mb-4">
-                    <div id="progress-bar-fill" class="bg-gradient-to-r from-purple-500 via-fuchsia-500 to-pink-500 h-2 rounded-full transition-all duration-700 shadow-lg shadow-purple-500/50" style="width: 0%"></div>
+                <div class="w-full bg-slate-950/90 rounded-full h-3.5 p-0.5 border border-purple-500/40 mb-4 shadow-inner">
+                    <div id="progress-bar-fill" class="bg-gradient-to-r from-purple-500 via-fuchsia-500 to-pink-500 h-2.5 rounded-full transition-all duration-700 shadow-lg shadow-purple-500/60" style="width: 0%"></div>
                 </div>
                 <div class="grid grid-cols-2 gap-3 pt-1">
-                    <div class="glass-card p-3.5 rounded-xl border border-purple-500/20 text-center">
-                        <span class="block text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Roster Cards</span>
-                        <span id="stat-roster" class="text-lg font-extrabold text-indigo-300 mt-0.5 block">0</span>
+                    <div class="card-3d p-3.5 rounded-2xl border border-purple-500/20 text-center shadow-lg">
+                        <span class="block text-[10px] text-slate-400 uppercase tracking-wider font-bold">Roster Cards</span>
+                        <span id="stat-roster" class="text-xl font-extrabold text-indigo-300 mt-0.5 block drop-shadow">0</span>
                     </div>
-                    <div class="glass-card p-3.5 rounded-xl border border-purple-500/20 text-center">
-                        <span class="block text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Unique Collected</span>
-                        <span id="stat-unique" class="text-lg font-extrabold text-emerald-400 mt-0.5 block">0</span>
+                    <div class="card-3d p-3.5 rounded-2xl border border-purple-500/20 text-center shadow-lg">
+                        <span class="block text-[10px] text-slate-400 uppercase tracking-wider font-bold">Unique Collected</span>
+                        <span id="stat-unique" class="text-xl font-extrabold text-emerald-400 mt-0.5 block drop-shadow">0</span>
                     </div>
                 </div>
             </div>
 
             <!-- Quick Bot Commands -->
-            <div class="glass rounded-2xl p-4 space-y-3">
-                <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Bot Quick Links</h3>
-                <div class="grid grid-cols-2 gap-2.5">
-                    <button onclick="sendBotCommand('/summon')" class="glass-card hover:bg-slate-800/80 border border-purple-500/20 p-3 rounded-xl text-left transition flex items-center space-x-2.5 group">
-                        <span class="text-xl group-hover:scale-110 transition">🌌</span>
+            <div class="glass-3d rounded-3xl p-4 space-y-3 shadow-xl">
+                <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider">Bot Quick Links</h3>
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="sendBotCommand('/summon')" class="card-3d hover:scale-[1.02] active:scale-95 border border-purple-500/30 p-3.5 rounded-2xl text-left transition flex items-center space-x-3 group shadow-lg">
+                        <span class="text-2xl group-hover:scale-110 transition">🌌</span>
                         <div>
-                            <span class="block text-xs font-bold text-slate-200">Summon</span>
-                            <span class="text-[10px] text-purple-400">/summon</span>
+                            <span class="block text-xs font-bold text-slate-100">Summon</span>
+                            <span class="text-[10px] text-purple-400 font-semibold">/summon</span>
                         </div>
                     </button>
-                    <button onclick="claimDaily()" class="glass-card hover:bg-slate-800/80 border border-purple-500/20 p-3 rounded-xl text-left transition flex items-center space-x-2.5 group">
-                        <span class="text-xl group-hover:scale-110 transition">🎁</span>
+                    <button onclick="claimDaily()" class="card-3d hover:scale-[1.02] active:scale-95 border border-purple-500/30 p-3.5 rounded-2xl text-left transition flex items-center space-x-3 group shadow-lg">
+                        <span class="text-2xl group-hover:scale-110 transition">🎁</span>
                         <div>
-                            <span class="block text-xs font-bold text-slate-200">Daily Claim</span>
-                            <span class="text-[10px] text-purple-400">+500 SS & Card</span>
+                            <span class="block text-xs font-bold text-slate-100">Daily Claim</span>
+                            <span class="text-[10px] text-purple-400 font-semibold">+500 SS & Card</span>
                         </div>
                     </button>
                 </div>
@@ -118,7 +153,7 @@
 
         <!-- TAB 2: SHOP -->
         <section id="tab-shop" class="tab-content space-y-4 hidden">
-            <div class="glass rounded-2xl p-4">
+            <div class="glass-3d rounded-3xl p-4 shadow-xl">
                 <h3 class="text-sm font-bold text-slate-100 mb-1 flex items-center space-x-2">
                     <span>🛍️</span>
                     <span>SHOP</span>
@@ -133,38 +168,38 @@
 
         <!-- TAB 3: MINES GAME -->
         <section id="tab-mines" class="tab-content space-y-4 hidden">
-            <div class="glass rounded-2xl p-4 text-center">
+            <div class="glass-3d rounded-3xl p-4 text-center shadow-xl">
                 <h3 class="text-sm font-bold text-amber-400 mb-1">💣 Spiritual Mines Betting</h3>
                 <p class="text-xs text-slate-400 mb-4">Uncover safe crystals, avoid hidden mines, and multiply your Spirit Stones!</p>
 
                 <!-- Bet Setup Form -->
-                <div id="mines-setup" class="space-y-3 text-left glass-card p-4 rounded-xl border border-purple-500/20">
+                <div id="mines-setup" class="space-y-3 text-left card-3d p-4 rounded-2xl border border-purple-500/30 shadow-lg">
                     <div>
-                        <label class="block text-[11px] text-slate-300 font-semibold mb-1">Bet Amount (Min 50 SS)</label>
-                        <input type="number" id="mine-bet" value="50" min="50" class="w-full bg-slate-950/90 border border-slate-700 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
+                        <label class="block text-[11px] text-slate-300 font-bold mb-1">Bet Amount (Min 50 SS)</label>
+                        <input type="number" id="mine-bet" value="50" min="50" class="w-full bg-slate-950/90 border border-slate-700 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-purple-500 shadow-inner">
                     </div>
                     <div>
-                        <label class="block text-[11px] text-slate-300 font-semibold mb-1">Mines Count (1 - 24)</label>
-                        <input type="number" id="mine-count" value="3" min="1" max="24" class="w-full bg-slate-950/90 border border-slate-700 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
+                        <label class="block text-[11px] text-slate-300 font-bold mb-1">Mines Count (1 - 24)</label>
+                        <input type="number" id="mine-count" value="3" min="1" max="24" class="w-full bg-slate-950/90 border border-slate-700 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-purple-500 shadow-inner">
                     </div>
-                    <button onclick="startMinesGame()" class="w-full bg-gradient-to-r from-emerald-600 to-teal-600 font-bold py-3 rounded-xl shadow-lg shadow-emerald-900/40 hover:opacity-90 transition text-sm">
+                    <button onclick="startMinesGame()" class="w-full btn-emerald-300 font-bold py-3.5 rounded-xl text-sm tracking-wide text-white shadow-xl">
                         🚀 Start Mines Game
                     </button>
                 </div>
 
                 <!-- Active Mines Board -->
                 <div id="mines-board-container" class="hidden space-y-4">
-                    <div class="flex justify-between items-center glass-card p-3 rounded-xl border border-purple-500/20 text-xs">
-                        <div>Multiplier: <span id="mine-mult" class="font-extrabold text-amber-400">1.00x</span></div>
-                        <div>Potential: <span id="mine-potential" class="font-extrabold text-emerald-400">0 SS</span></div>
+                    <div class="flex justify-between items-center card-3d p-3.5 rounded-2xl border border-purple-500/30 text-xs shadow-lg">
+                        <div>Multiplier: <span id="mine-mult" class="font-extrabold text-amber-400 text-sm">1.00x</span></div>
+                        <div>Potential: <span id="mine-potential" class="font-extrabold text-emerald-400 text-sm">0 SS</span></div>
                     </div>
 
-                    <div id="mines-grid" class="grid grid-cols-5 gap-2 max-w-[320px] mx-auto">
+                    <div id="mines-grid" class="grid grid-cols-5 gap-2.5 max-w-[340px] mx-auto py-2">
                         <!-- 25 tiles -->
                     </div>
 
                     <div id="mines-controls" class="pt-2">
-                        <!-- Dynamically updated controls (Cash out / Quit or Play Again) -->
+                        <!-- Dynamically updated controls -->
                     </div>
                 </div>
             </div>
@@ -172,9 +207,9 @@
 
         <!-- TAB 4: ROSTER -->
         <section id="tab-roster" class="tab-content space-y-4 hidden">
-            <div class="glass rounded-2xl p-4">
+            <div class="glass-3d rounded-3xl p-4 shadow-xl">
                 <h3 class="text-sm font-bold text-slate-100 mb-3">📜 Your Cultivation Crew</h3>
-                <div id="roster-list" class="space-y-2.5 max-h-[60vh] overflow-y-auto pr-1">
+                <div id="roster-list" class="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
                     <!-- Loaded dynamically -->
                 </div>
             </div>
@@ -183,22 +218,22 @@
     </main>
 
     <!-- Bottom Navigation Bar -->
-    <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto glass border-t border-purple-900/30 p-2.5 flex justify-around items-center z-50">
-        <button onclick="switchTab('dashboard')" class="nav-btn flex flex-col items-center space-y-1 text-purple-400 transition" data-tab="dashboard">
-            <span class="text-xl">📊</span>
-            <span class="text-[10px] font-bold">Dashboard</span>
+    <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto glass-3d border-t border-purple-900/50 p-3 flex justify-around items-center z-50 shadow-2xl">
+        <button onclick="switchTab('dashboard')" class="nav-btn flex flex-col items-center space-y-1 text-purple-400 transition hover:scale-105" data-tab="dashboard">
+            <span class="text-xl drop-shadow">📊</span>
+            <span class="text-[10px] font-extrabold">Dashboard</span>
         </button>
-        <button onclick="switchTab('shop')" class="nav-btn flex flex-col items-center space-y-1 text-slate-400 hover:text-slate-200 transition" data-tab="shop">
-            <span class="text-xl">🛍️</span>
-            <span class="text-[10px] font-bold">SHOP</span>
+        <button onclick="switchTab('shop')" class="nav-btn flex flex-col items-center space-y-1 text-slate-400 hover:text-slate-200 transition hover:scale-105" data-tab="shop">
+            <span class="text-xl drop-shadow">🛍️</span>
+            <span class="text-[10px] font-extrabold">SHOP</span>
         </button>
-        <button onclick="switchTab('mines')" class="nav-btn flex flex-col items-center space-y-1 text-slate-400 hover:text-slate-200 transition" data-tab="mines">
-            <span class="text-xl">💣</span>
-            <span class="text-[10px] font-bold">Mines</span>
+        <button onclick="switchTab('mines')" class="nav-btn flex flex-col items-center space-y-1 text-slate-400 hover:text-slate-200 transition hover:scale-105" data-tab="mines">
+            <span class="text-xl drop-shadow">💣</span>
+            <span class="text-[10px] font-extrabold">Mines</span>
         </button>
-        <button onclick="switchTab('roster')" class="nav-btn flex flex-col items-center space-y-1 text-slate-400 hover:text-slate-200 transition" data-tab="roster">
-            <span class="text-xl">📜</span>
-            <span class="text-[10px] font-bold">Roster</span>
+        <button onclick="switchTab('roster')" class="nav-btn flex flex-col items-center space-y-1 text-slate-400 hover:text-slate-200 transition hover:scale-105" data-tab="roster">
+            <span class="text-xl drop-shadow">📜</span>
+            <span class="text-[10px] font-extrabold">Roster</span>
         </button>
     </nav>
 
@@ -244,13 +279,13 @@
             for (const [num, item] of Object.entries(appData.pill_catalog)) {
                 const owned = appData.pills[item.name] || 0;
                 catalogEl.innerHTML += `
-                    <div class="glass-card p-3 rounded-xl border border-purple-500/20 flex justify-between items-center">
+                    <div class="card-3d p-3.5 rounded-2xl border border-purple-500/20 flex justify-between items-center shadow-lg">
                         <div>
                             <span class="block text-xs font-bold text-white">${item.name}</span>
                             <span class="text-[10px] text-slate-400">${item.desc}</span>
-                            <span class="block text-[11px] font-extrabold text-amber-400 mt-0.5">💎 ${item.price} SS (Owned: ${owned})</span>
+                            <span class="block text-[11px] font-extrabold text-amber-400 mt-1">💎 ${item.price} SS (Owned: ${owned})</span>
                         </div>
-                        <button onclick="buyPill('${num}')" class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:opacity-90 font-bold px-3 py-2 rounded-lg text-xs transition shadow">
+                        <button onclick="buyPill('${num}')" class="btn-3d font-bold px-4 py-2.5 rounded-xl text-xs text-white tracking-wide shadow-md">
                             Buy
                         </button>
                     </div>
@@ -265,13 +300,13 @@
             } else {
                 appData.user_cards.forEach(c => {
                     rosterEl.innerHTML += `
-                        <div class="glass-card p-3 rounded-xl border border-purple-500/20 flex justify-between items-center text-xs">
+                        <div class="card-3d p-3.5 rounded-2xl border border-purple-500/20 flex justify-between items-center text-xs shadow-lg">
                             <div>
-                                <span class="font-bold text-white">${c.name}</span>
-                                <span class="block text-[10px] text-purple-400">${c.tier} | 💎 ${c.worth} SS</span>
-                                <span class="block text-[10px] text-slate-400">Code: ${c.code}</span>
+                                <span class="font-bold text-white text-sm">${c.name}</span>
+                                <span class="block text-[10px] text-purple-300 mt-0.5">${c.tier} | 💎 ${c.worth} SS</span>
+                                <span class="block text-[10px] text-slate-400 mt-0.5">Code: ${c.code}</span>
                             </div>
-                            <span class="text-[10px] bg-slate-900/80 border border-purple-500/30 px-2 py-1 rounded text-emerald-400 font-semibold">${c.stay_time}</span>
+                            <span class="text-[10px] bg-slate-900/90 border border-purple-500/40 px-2.5 py-1 rounded-lg text-emerald-400 font-bold shadow-inner">${c.stay_time}</span>
                         </div>
                     `;
                 });
@@ -368,26 +403,26 @@
             gridEl.innerHTML = '';
             for (let i = 0; i < 25; i++) {
                 let content = '🟦';
-                let bg = 'glass-card hover:bg-slate-700/60 border border-purple-500/20';
+                let bg = 'tile-3d';
                 let disabled = false;
 
                 if (activeMines.revealed.includes(i)) {
                     content = '💎';
-                    bg = 'bg-emerald-950/80 border border-emerald-500/50 shadow-lg shadow-emerald-900/30';
+                    bg = 'bg-emerald-950/90 border border-emerald-500/60 shadow-lg shadow-emerald-900/40';
                     disabled = true;
                 } else if (activeMines.game_over) {
                     if (activeMines.mine_positions.includes(i)) {
                         content = '💣';
-                        bg = 'bg-rose-950/80 border border-rose-500/50 shadow-lg shadow-rose-900/30';
+                        bg = 'bg-rose-950/90 border border-rose-500/60 shadow-lg shadow-rose-900/40';
                     } else {
                         content = '🟩';
-                        bg = 'bg-slate-900/80 border border-slate-700';
+                        bg = 'bg-slate-900/90 border border-slate-700';
                     }
                     disabled = true;
                 }
 
                 gridEl.innerHTML += `
-                    <button ${disabled ? 'disabled' : ''} onclick="clickTile(${i})" class="${bg} w-12 h-12 rounded-xl text-xl flex items-center justify-center transition font-bold shadow">
+                    <button ${disabled ? 'disabled' : ''} onclick="clickTile(${i})" class="${bg} w-13 h-13 w-full aspect-square rounded-2xl text-2xl flex items-center justify-center font-bold">
                         ${content}
                     </button>
                 `;
@@ -396,24 +431,24 @@
             const controlsEl = document.getElementById('mines-controls');
             if (activeMines.game_over) {
                 controlsEl.innerHTML = `
-                    <button onclick="resetMinesSetup()" class="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:opacity-90 font-bold py-3 rounded-xl text-xs transition shadow-lg shadow-purple-900/40">
+                    <button onclick="resetMinesSetup()" class="w-full btn-3d font-bold py-3.5 rounded-2xl text-xs text-white tracking-wide shadow-xl">
                         🔄 Play Again (Change Bet / Mines)
                     </button>
                 `;
             } else if (activeMines.tiles_opened > 0) {
                 controlsEl.innerHTML = `
-                    <div class="flex space-x-2">
-                        <button onclick="cashOutMines()" class="flex-1 bg-amber-600 hover:bg-amber-500 font-bold py-2.5 rounded-xl text-xs transition shadow-lg shadow-amber-900/30">
+                    <div class="flex space-x-2.5">
+                        <button onclick="cashOutMines()" class="flex-1 btn-emerald-300 font-bold py-3 rounded-2xl text-xs text-white shadow-lg">
                             💰 Cash Out (${activeMines.potential} SS)
                         </button>
-                        <button onclick="surrenderMines()" class="px-4 bg-rose-600/80 hover:bg-rose-600 font-bold py-2.5 rounded-xl text-xs transition shadow-lg shadow-rose-900/30">
+                        <button onclick="surrenderMines()" class="px-5 bg-gradient-to-r from-rose-600 to-red-600 hover:opacity-90 font-bold py-3 rounded-2xl text-xs text-white shadow-lg">
                             🛑 Quit
                         </button>
                     </div>
                 `;
             } else {
                 controlsEl.innerHTML = `
-                    <button onclick="surrenderMines()" class="w-full bg-rose-600/80 hover:bg-rose-600 font-bold py-2.5 rounded-xl text-xs transition shadow-lg shadow-rose-900/30">
+                    <button onclick="surrenderMines()" class="w-full bg-gradient-to-r from-rose-600 to-red-600 hover:opacity-90 font-bold py-3 rounded-2xl text-xs text-white shadow-lg">
                         🛑 Quit Game
                     </button>
                 `;
@@ -421,7 +456,7 @@
         }
 
         async function clickTile(idx) {
-            if (!activeMines || activeMignedGame?.game_over) return;
+            if (!activeMines || activeMines.game_over) return;
             try {
                 const res = await fetch('/api/mine/click', {
                     method: 'POST',

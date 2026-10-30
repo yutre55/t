@@ -1057,9 +1057,10 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends an inline button to open the Cultivation Telegram Mini App."""
-    if not update.message:
+    message = update.effective_message
+    if not message:
         return
-    user = update.message.from_user
+    user = update.effective_user
     if user:
         track_user_data(user)
 
@@ -1070,7 +1071,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
     ])
 
-    await update.message.reply_text(
+    await message.reply_text(
         "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
         "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
         reply_markup=keyboard,
@@ -1408,9 +1409,10 @@ async def showcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends an inline button to open the Cultivation Telegram Mini App."""
-    if not update.message:
+    message = update.effective_message
+    if not message:
         return
-    user = update.message.from_user
+    user = update.effective_user
     if user:
         track_user_data(user)
 
@@ -1421,7 +1423,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
     ])
 
-    await update.message.reply_text(
+    await message.reply_text(
         "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
         "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
         reply_markup=keyboard,
@@ -2079,9 +2081,10 @@ async def myprofile_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends an inline button to open the Cultivation Telegram Mini App."""
-    if not update.message:
+    message = update.effective_message
+    if not message:
         return
-    user = update.message.from_user
+    user = update.effective_user
     if user:
         track_user_data(user)
 
@@ -2092,7 +2095,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
     ])
 
-    await update.message.reply_text(
+    await message.reply_text(
         "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
         "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
         reply_markup=keyboard,
@@ -2249,9 +2252,10 @@ async def finalize_add_card(update: Update, user_id: int, tier: str, char_name: 
 
 async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends an inline button to open the Cultivation Telegram Mini App."""
-    if not update.message:
+    message = update.effective_message
+    if not message:
         return
-    user = update.message.from_user
+    user = update.effective_user
     if user:
         track_user_data(user)
 
@@ -2262,7 +2266,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
     ])
 
-    await update.message.reply_text(
+    await message.reply_text(
         "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
         "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
         reply_markup=keyboard,
@@ -2851,9 +2855,10 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends an inline button to open the Cultivation Telegram Mini App."""
-    if not update.message:
+    message = update.effective_message
+    if not message:
         return
-    user = update.message.from_user
+    user = update.effective_user
     if user:
         track_user_data(user)
 
@@ -2864,7 +2869,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
     ])
 
-    await update.message.reply_text(
+    await message.reply_text(
         "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
         "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
         reply_markup=keyboard,
@@ -3424,9 +3429,10 @@ async def fourwords_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends an inline button to open the Cultivation Telegram Mini App."""
-    if not update.message:
+    message = update.effective_message
+    if not message:
         return
-    user = update.message.from_user
+    user = update.effective_user
     if user:
         track_user_data(user)
 
@@ -3437,7 +3443,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
     ])
 
-    await update.message.reply_text(
+    await message.reply_text(
         "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
         "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
         reply_markup=keyboard,
@@ -3506,6 +3512,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
             await finalize_add_card(update, user.id, tier, char_name, photo)
             return
+
+    if user_text.lower().strip() in ["/app", "app", "miniapp", "/miniapp"] or (context.bot and context.bot.username and user_text.lower().strip() == f"/app@{context.bot.username.lower()}"):
+        await app_command(update, context)
+        return
 
     # Ignore command messages starting with '/'
     if user_text.startswith('/'):
