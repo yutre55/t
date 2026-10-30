@@ -1395,60 +1395,31 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         if query_text in c_name:
             matched_pool.append(card)
 
+    default_card_image = "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=600&auto=format&fit=crop&q=60&ixlib=rb-4.0.3"
+
     for card in matched_pool[:20]:
         c_id = card.get("id", f"card_{random.randint(1000,9999)}")
         c_name = card.get("name", "Cultivator")
         tier = card.get("tier", "Mortal")
         tier_emoji = TIER_EMOJIS.get(tier, tier)
-        worth = TIER_WORTH.get(tier, 200)
         photo = card.get("photo", "")
+
+        photo_url = photo if (photo and (photo.startswith("http://") or photo.startswith("https://"))) else default_card_image
 
         caption = (
             f"⚔️ <b>Name:</b> {escape_html(c_name)}\n"
-            f"✨ <b>Tier:</b> {tier_emoji}\n"
-            f"💎 <b>Worth:</b> <code>{worth} SS</code>\n"
-            f"⏳ <b>Stay Time in Crew:</b> <code>Eternal Life / Immortal Body ♾️</code>"
+            f"✨ <b>Tier:</b> {tier_emoji}"
         )
 
-        if photo:
-            if photo.startswith("http://") or photo.startswith("https://"):
-                results.append(
-                    InlineQueryResultPhoto(
-                        id=c_id,
-                        photo_url=photo,
-                        thumbnail_url=photo,
-                        caption=caption,
-                        parse_mode="HTML"
-                    )
-                )
-            else:
-                try:
-                    results.append(
-                        InlineQueryResultCachedPhoto(
-                            id=c_id,
-                            photo_file_id=photo,
-                            caption=caption,
-                            parse_mode="HTML"
-                        )
-                    )
-                except Exception:
-                    results.append(
-                        InlineQueryResultArticle(
-                            id=c_id,
-                            title=f"🎴 {c_name} [{tier}]",
-                            description=f"Tier: {tier} | Worth: {worth} SS",
-                            input_message_content=InputTextMessageContent(caption, parse_mode="HTML")
-                        )
-                    )
-        else:
-            results.append(
-                InlineQueryResultArticle(
-                    id=c_id,
-                    title=f"🎴 {c_name} [{tier}]",
-                    description=f"Tier: {tier} | Worth: {worth} SS",
-                    input_message_content=InputTextMessageContent(caption, parse_mode="HTML")
-                )
+        results.append(
+            InlineQueryResultPhoto(
+                id=c_id,
+                photo_url=photo_url,
+                thumbnail_url=photo_url,
+                caption=caption,
+                parse_mode="HTML"
             )
+        )
 
     if not results and query_text:
         results.append(
