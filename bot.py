@@ -45,6 +45,45 @@ USERS_DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user
 REMINDERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reminders.json")
 KEYS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "groq_keys.json")
 
+# ==================== ACTIVITY LOGS SETUP ====================
+LOGS_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs_config.json")
+
+def load_logs_gc_id() -> int:
+    if os.path.exists(LOGS_CONFIG_FILE):
+        try:
+            with open(LOGS_CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f).get("logs_gc_id", 0)
+        except Exception:
+            pass
+    return int(os.getenv("LOGS_GC_ID", "0"))
+
+def save_logs_gc_id(chat_id: int):
+    try:
+        with open(LOGS_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump({"logs_gc_id": chat_id}, f, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving logs_config.json: {e}")
+
+LOGS_GC_ID = load_logs_gc_id()
+
+def send_telegram_log(text: str):
+    global LOGS_GC_ID
+    if LOGS_GC_ID == 0:
+        return
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": LOGS_GC_ID,
+            "text": f"📊 <b>BOT ACTIVITY LOG</b>\n\n{text}",
+            "parse_mode": "HTML"
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            pass
+    except Exception as e:
+        logger.warning(f"Could not send Telegram activity log: {e}")
+
 # ==================== MONGO DATABASE SETUP ====================
 MONGO_URI = os.getenv("MONGO_URI") or os.getenv("MONGODB_URI")
 mongo_client = None
@@ -1078,6 +1117,42 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         parse_mode='HTML'
     )
 
+async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Owner command to set the target group chat ID for real-time activity logs."""
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    if not is_owner(user.id):
+        await message.reply_text("🚫 Only the bot owner can use this command!")
+        return
+
+    args = context.args or []
+    if not args:
+        chat_id = message.chat.id
+        global LOGS_GC_ID
+        LOGS_GC_ID = chat_id
+        save_logs_gc_id(chat_id)
+        await message.reply_text(
+            f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
+            f"This chat (ID: <code>{chat_id}</code>) will now receive all real-time bot user activity logs.",
+            parse_mode='HTML'
+        )
+        return
+
+    try:
+        target_id = int(args[0].strip())
+        global LOGS_GC_ID
+        LOGS_GC_ID = target_id
+        save_logs_gc_id(target_id)
+        await message.reply_text(
+            f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
+            f"Target Chat ID: <code>{target_id}</code> will now receive all real-time bot user activity logs.",
+            parse_mode='HTML'
+        )
+    except ValueError:
+        await message.reply_text("⚠️ Invalid Chat ID! Must be a valid integer.", parse_mode='HTML')
+
 async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Displays the Spirit Stones economy leaderboard (top players)."""
     message = update.effective_message
@@ -1475,6 +1550,42 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         reply_markup=keyboard,
         parse_mode='HTML'
     )
+
+async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Owner command to set the target group chat ID for real-time activity logs."""
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    if not is_owner(user.id):
+        await message.reply_text("🚫 Only the bot owner can use this command!")
+        return
+
+    args = context.args or []
+    if not args:
+        chat_id = message.chat.id
+        global LOGS_GC_ID
+        LOGS_GC_ID = chat_id
+        save_logs_gc_id(chat_id)
+        await message.reply_text(
+            f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
+            f"This chat (ID: <code>{chat_id}</code>) will now receive all real-time bot user activity logs.",
+            parse_mode='HTML'
+        )
+        return
+
+    try:
+        target_id = int(args[0].strip())
+        global LOGS_GC_ID
+        LOGS_GC_ID = target_id
+        save_logs_gc_id(target_id)
+        await message.reply_text(
+            f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
+            f"Target Chat ID: <code>{target_id}</code> will now receive all real-time bot user activity logs.",
+            parse_mode='HTML'
+        )
+    except ValueError:
+        await message.reply_text("⚠️ Invalid Chat ID! Must be a valid integer.", parse_mode='HTML')
 
 async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Displays the Spirit Stones economy leaderboard (top players)."""
@@ -2194,6 +2305,42 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         parse_mode='HTML'
     )
 
+async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Owner command to set the target group chat ID for real-time activity logs."""
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    if not is_owner(user.id):
+        await message.reply_text("🚫 Only the bot owner can use this command!")
+        return
+
+    args = context.args or []
+    if not args:
+        chat_id = message.chat.id
+        global LOGS_GC_ID
+        LOGS_GC_ID = chat_id
+        save_logs_gc_id(chat_id)
+        await message.reply_text(
+            f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
+            f"This chat (ID: <code>{chat_id}</code>) will now receive all real-time bot user activity logs.",
+            parse_mode='HTML'
+        )
+        return
+
+    try:
+        target_id = int(args[0].strip())
+        global LOGS_GC_ID
+        LOGS_GC_ID = target_id
+        save_logs_gc_id(target_id)
+        await message.reply_text(
+            f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
+            f"Target Chat ID: <code>{target_id}</code> will now receive all real-time bot user activity logs.",
+            parse_mode='HTML'
+        )
+    except ValueError:
+        await message.reply_text("⚠️ Invalid Chat ID! Must be a valid integer.", parse_mode='HTML')
+
 async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Displays the Spirit Stones economy leaderboard (top players)."""
     message = update.effective_message
@@ -2410,6 +2557,42 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         reply_markup=keyboard,
         parse_mode='HTML'
     )
+
+async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Owner command to set the target group chat ID for real-time activity logs."""
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    if not is_owner(user.id):
+        await message.reply_text("🚫 Only the bot owner can use this command!")
+        return
+
+    args = context.args or []
+    if not args:
+        chat_id = message.chat.id
+        global LOGS_GC_ID
+        LOGS_GC_ID = chat_id
+        save_logs_gc_id(chat_id)
+        await message.reply_text(
+            f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
+            f"This chat (ID: <code>{chat_id}</code>) will now receive all real-time bot user activity logs.",
+            parse_mode='HTML'
+        )
+        return
+
+    try:
+        target_id = int(args[0].strip())
+        global LOGS_GC_ID
+        LOGS_GC_ID = target_id
+        save_logs_gc_id(target_id)
+        await message.reply_text(
+            f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
+            f"Target Chat ID: <code>{target_id}</code> will now receive all real-time bot user activity logs.",
+            parse_mode='HTML'
+        )
+    except ValueError:
+        await message.reply_text("⚠️ Invalid Chat ID! Must be a valid integer.", parse_mode='HTML')
 
 async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Displays the Spirit Stones economy leaderboard (top players)."""
@@ -3060,6 +3243,42 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         parse_mode='HTML'
     )
 
+async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Owner command to set the target group chat ID for real-time activity logs."""
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    if not is_owner(user.id):
+        await message.reply_text("🚫 Only the bot owner can use this command!")
+        return
+
+    args = context.args or []
+    if not args:
+        chat_id = message.chat.id
+        global LOGS_GC_ID
+        LOGS_GC_ID = chat_id
+        save_logs_gc_id(chat_id)
+        await message.reply_text(
+            f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
+            f"This chat (ID: <code>{chat_id}</code>) will now receive all real-time bot user activity logs.",
+            parse_mode='HTML'
+        )
+        return
+
+    try:
+        target_id = int(args[0].strip())
+        global LOGS_GC_ID
+        LOGS_GC_ID = target_id
+        save_logs_gc_id(target_id)
+        await message.reply_text(
+            f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
+            f"Target Chat ID: <code>{target_id}</code> will now receive all real-time bot user activity logs.",
+            parse_mode='HTML'
+        )
+    except ValueError:
+        await message.reply_text("⚠️ Invalid Chat ID! Must be a valid integer.", parse_mode='HTML')
+
 async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Displays the Spirit Stones economy leaderboard (top players)."""
     message = update.effective_message
@@ -3679,6 +3898,42 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         reply_markup=keyboard,
         parse_mode='HTML'
     )
+
+async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Owner command to set the target group chat ID for real-time activity logs."""
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    if not is_owner(user.id):
+        await message.reply_text("🚫 Only the bot owner can use this command!")
+        return
+
+    args = context.args or []
+    if not args:
+        chat_id = message.chat.id
+        global LOGS_GC_ID
+        LOGS_GC_ID = chat_id
+        save_logs_gc_id(chat_id)
+        await message.reply_text(
+            f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
+            f"This chat (ID: <code>{chat_id}</code>) will now receive all real-time bot user activity logs.",
+            parse_mode='HTML'
+        )
+        return
+
+    try:
+        target_id = int(args[0].strip())
+        global LOGS_GC_ID
+        LOGS_GC_ID = target_id
+        save_logs_gc_id(target_id)
+        await message.reply_text(
+            f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
+            f"Target Chat ID: <code>{target_id}</code> will now receive all real-time bot user activity logs.",
+            parse_mode='HTML'
+        )
+    except ValueError:
+        await message.reply_text("⚠️ Invalid Chat ID! Must be a valid integer.", parse_mode='HTML')
 
 async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Displays the Spirit Stones economy leaderboard (top players)."""
@@ -4375,9 +4630,10 @@ def main():
     app.add_handler(CommandHandler("start", help_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("status", status_command))
-    app.add_handler(CommandHandler("app", app_command))
+    app.add_handler(CommandHandler(["app", "miniapp", "webapp"], app_command))
     app.add_handler(CommandHandler("leaderboard", leaderboard_command))
     app.add_handler(CommandHandler("lb", leaderboard_command))
+    app.add_handler(CommandHandler("logsgc", logsgc_command))
     app.add_handler(CommandHandler("addapi", addapi_command))
     app.add_handler(CommandHandler("listapi", listapi_command))
     app.add_handler(CommandHandler("statsgc", statsgc_command))
