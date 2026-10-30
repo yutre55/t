@@ -120,10 +120,10 @@
         <section id="tab-shop" class="tab-content space-y-4 hidden">
             <div class="glass rounded-2xl p-4">
                 <h3 class="text-sm font-bold text-slate-100 mb-1 flex items-center space-x-2">
-                    <span>pillshop</span>
-                    <span>Cultivation Pill Shop</span>
+                    <span>🛍️</span>
+                    <span>SHOP</span>
                 </h3>
-                <p class="text-xs text-slate-400 mb-4">Buy pills to extend your cultivator cards stay limit or achieve immortality!</p>
+                <p class="text-xs text-slate-400 mb-4">Buy cultivation pills to extend your cards stay limit or achieve immortality!</p>
 
                 <div id="shop-catalog" class="space-y-3">
                     <!-- Loaded dynamically -->
@@ -189,8 +189,8 @@
             <span class="text-[10px] font-bold">Dashboard</span>
         </button>
         <button onclick="switchTab('shop')" class="nav-btn flex flex-col items-center space-y-1 text-slate-400 hover:text-slate-200 transition" data-tab="shop">
-            <span class="text-xl">pillshop</span>
-            <span class="text-[10px] font-bold">Shop</span>
+            <span class="text-xl">🛍️</span>
+            <span class="text-[10px] font-bold">SHOP</span>
         </button>
         <button onclick="switchTab('mines')" class="nav-btn flex flex-col items-center space-y-1 text-slate-400 hover:text-slate-200 transition" data-tab="mines">
             <span class="text-xl">💣</span>
@@ -421,7 +421,7 @@
         }
 
         async function clickTile(idx) {
-            if (!activeMines || activeMines.game_over) return;
+            if (!activeMines || activeMignedGame?.game_over) return;
             try {
                 const res = await fetch('/api/mine/click', {
                     method: 'POST',

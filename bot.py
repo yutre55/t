@@ -1183,6 +1183,27 @@ def get_tier_menu_view(page: int = 0, time_filter: str = "all") -> Tuple[str, In
     ]
     return text, InlineKeyboardMarkup(keyboard_rows)
 
+def get_time_menu_view(page: int = 0, tier_filter: str = "All") -> Tuple[str, InlineKeyboardMarkup]:
+    text = (
+        f"⏱️ <b>FILTER ROSTER BY STAY TIME</b>\n\n"
+        f"Select card expiration time filter below:"
+    )
+    keyboard_rows = [
+        [
+            InlineKeyboardButton("⏱️ Less than 24 Hours (< 24h)", callback_data=f"mycards_p_0_{tier_filter}_lt24h")
+        ],
+        [
+            InlineKeyboardButton("⏱️ More than 24 Hours (> 24h)", callback_data=f"mycards_p_0_{tier_filter}_gt24h")
+        ],
+        [
+            InlineKeyboardButton("🌐 Show All Time", callback_data=f"mycards_p_0_{tier_filter}_all")
+        ],
+        [
+            InlineKeyboardButton("🔙 Back to Roster", callback_data=f"mycards_p_{page}_{tier_filter}_all")
+        ]
+    ]
+    return text, InlineKeyboardMarkup(keyboard_rows)
+
 def get_user_roster_view(user_id: int, page: int = 0, tier_filter: str = "All", time_filter: str = "all") -> Tuple[str, Optional[InlineKeyboardMarkup]]:
     clean_expired_cards()
     user_cards = [c for c in user_cards_db.values() if c.get("owner_id") == user_id]
@@ -1196,12 +1217,20 @@ def get_user_roster_view(user_id: int, page: int = 0, tier_filter: str = "All", 
         t = c.get("tier", "Mortal").capitalize()
         if tier_filter != "All" and t.lower() != tier_filter.lower():
             continue
-        if time_filter == "24h":
+
+        if time_filter == "lt24h":
             if c.get("is_permanent", False):
                 continue
             diff = c.get("expire_at", 0) - now
             if diff <= 0 or diff > 24 * 3600:
                 continue
+        elif time_filter == "gt24h":
+            if c.get("is_permanent", False):
+                pass
+            else:
+                diff = c.get("expire_at", 0) - now
+                if diff <= 24 * 3600:
+                    continue
         filtered_cards.append(c)
 
     tier_order = {"Primordial": 5, "Celestial": 4, "Transcendent": 3, "Awakened": 2, "Mortal": 1}
@@ -1226,8 +1255,10 @@ def get_user_roster_view(user_id: int, page: int = 0, tier_filter: str = "All", 
     cards_str = "\n".join(lines) if lines else "<i>No cards match current filter.</i>"
 
     filter_info = f" | Tier: <b>{tier_filter}</b>" if tier_filter != "All" else ""
-    if time_filter == "24h":
+    if time_filter == "lt24h":
         filter_info += " | ⏱️ < 24h"
+    elif time_filter == "gt24h":
+        filter_info += " | ⏱️ > 24h"
 
     text = (
         f"📜 <b>Your Cultivation Roster</b> (Page {page+1}/{total_pages} | Total: {total_cards}{filter_info}):\n\n"
@@ -1246,13 +1277,16 @@ def get_user_roster_view(user_id: int, page: int = 0, tier_filter: str = "All", 
         nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"mycards_p_{page+1}_{tier_filter}_{time_filter}"))
     keyboard_rows.append(nav_buttons)
 
-    # Action buttons row: Sort by Tier & Time Filter
-    time_label = "⏱️ Time: All" if time_filter == "all" else "⏱️ Time: < 24h"
-    next_time_filter = "all" if time_filter == "24h" else "24h"
+    # Action buttons row: Sort by Tier & Time Filter Menu
+    time_label = "⏱️ Time: All"
+    if time_filter == "lt24h":
+        time_label = "⏱️ Time: < 24h"
+    elif time_filter == "gt24h":
+        time_label = "⏱️ Time: > 24h"
 
     keyboard_rows.append([
         InlineKeyboardButton(f"🗂️ Sort by Tier ({tier_filter})", callback_data=f"mycards_menu_tiers_{page}_{time_filter}"),
-        InlineKeyboardButton(time_label, callback_data=f"mycards_p_0_{tier_filter}_{next_time_filter}")
+        InlineKeyboardButton(time_label, callback_data=f"mycards_menu_time_{page}_{tier_filter}")
     ])
 
     return text, InlineKeyboardMarkup(keyboard_rows)
@@ -1293,6 +1327,23 @@ async def mycards_callback_handler(update: Update, context: ContextTypes.DEFAULT
                 await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
             except Exception as e:
                 logger.warning(f"Could not update tier menu: {e}")
+            await query.answer()
+        return
+
+    if data.startswith("mycards_menu_time_"):
+        parts = data.split("_")
+        if len(parts) >= 5:
+            try:
+                page = int(parts[3])
+                tier_filter = parts[4]
+            except ValueError:
+                page = 0
+                tier_filter = "All"
+            text, keyboard = get_time_menu_view(page, tier_filter)
+            try:
+                await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+            except Exception as e:
+                logger.warning(f"Could not update time menu: {e}")
             await query.answer()
         return
 
