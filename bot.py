@@ -210,33 +210,7 @@ CARDS_POOL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "card
 USER_CARDS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_cards.json")
 USER_ECONOMY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_economy.json")
 
-DEFAULT_CARDS_POOL = [
-    # Mortal
-    {"id": "M001", "name": "Xiao Yan", "tier": "Mortal", "photo": ""},
-    {"id": "M002", "name": "Tanjiro Kamado", "tier": "Mortal", "photo": ""},
-    {"id": "M003", "name": "Naruto Uzumaki", "tier": "Mortal", "photo": ""},
-    {"id": "M004", "name": "Monkey D. Luffy", "tier": "Mortal", "photo": ""},
-    {"id": "M005", "name": "Ichigo Kurosaki", "tier": "Mortal", "photo": ""},
-    # Awakened
-    {"id": "A001", "name": "Xiao Yan (Flame Master)", "tier": "Awakened", "photo": ""},
-    {"id": "A002", "name": "Ye Chen", "tier": "Awakened", "photo": ""},
-    {"id": "A003", "name": "Luo Feng", "tier": "Awakened", "photo": ""},
-    {"id": "A004", "name": "Tang San", "tier": "Awakened", "photo": ""},
-    # Transcendent
-    {"id": "T001", "name": "Lin Feng (Sword Sovereign)", "tier": "Transcendent", "photo": ""},
-    {"id": "T002", "name": "Ji Ning", "tier": "Transcendent", "photo": ""},
-    {"id": "T003", "name": "Meng Hao", "tier": "Transcendent", "photo": ""},
-    {"id": "T004", "name": "Wang Lin", "tier": "Transcendent", "photo": ""},
-    # Celestial
-    {"id": "C001", "name": "Sung Jin-Woo (Shadow Monarch)", "tier": "Celestial", "photo": ""},
-    {"id": "C002", "name": "Anos Voldigoad", "tier": "Celestial", "photo": ""},
-    {"id": "C003", "name": "Gojo Satoru", "tier": "Celestial", "photo": ""},
-    {"id": "C004", "name": "Rimuru Tempest", "tier": "Celestial", "photo": ""},
-    # Primordial
-    {"id": "P001", "name": "Hongjun (Ancestor of Dao)", "tier": "Primordial", "photo": ""},
-    {"id": "P002", "name": "Li Qiye", "tier": "Primordial", "photo": ""},
-    {"id": "P003", "name": "Shi Hao (Heaven Emperor)", "tier": "Primordial", "photo": ""},
-]
+DEFAULT_CARDS_POOL = []
 
 def load_cards_pool() -> List[Dict]:
     db = get_mongo_db()
