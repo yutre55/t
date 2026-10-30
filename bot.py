@@ -1378,45 +1378,89 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
 async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles inline queries (@botusername <card_name>) to search who owns specific cards."""
+    """Handles inline queries (@botusername <card_name>) to search global cards pool and show card images."""
     inline_query = update.inline_query
     if not inline_query:
         return
 
     query_text = inline_query.query.strip().lower()
-    clean_expired_cards()
 
     results = []
-    matched_cards = []
-    for code, card in user_cards_db.items():
+    matched_pool = []
+    for card in cards_pool_db:
         c_name = card.get("name", "").lower()
         if not query_text or query_text in c_name:
-            matched_cards.append((code, card))
+            matched_pool.append(card)
 
-    for code, card in matched_cards[:20]:
-        owner_id = card.get("owner_id")
-        owner_info = users_db.get(str(owner_id), {})
-        owner_name = owner_info.get("first_name", f"User {owner_id}")
-        owner_handle = f"@{owner_info.get('username')}" if owner_info.get("username") else owner_name
-
+    for card in matched_pool[:20]:
+        c_id = card.get("id", f"card_{random.randint(1000,9999)}")
         c_name = card.get("name", "Cultivator")
         tier = card.get("tier", "Mortal")
         tier_emoji = TIER_EMOJIS.get(tier, tier)
-        worth = get_card_worth(card)
-        stay_time = format_time_left(card)
+        worth = TIER_WORTH.get(tier, 200)
+        photo = card.get("photo", "")
 
-        title = f"🎴 {c_name} [{tier}]"
-        description = f"Owner: {owner_handle} | Worth: {worth} SS | Code: {code}"
-
-        content_text = (
-            f"🎴 <b>CARD OWNERSHIP SEARCH RESULT</b>\n\n"
+        caption = (
             f"⚔️ <b>Name:</b> {escape_html(c_name)}\n"
             f"✨ <b>Tier:</b> {tier_emoji}\n"
             f"💎 <b>Worth:</b> <code>{worth} SS</code>\n"
-            f"⏳ <b>Stay Time:</b> <code>{stay_time}</code>\n"
-            f"🔑 <b>Code:</b> <code>{code}</code>\n"
-            f"👤 <b>Owner:</b> {escape_html(owner_name)} ({escape_html(owner_handle)})"
+            f"⏳ <b>Stay Time in Crew:</b> <code>Eternal Life / Immortal Body ♾️</code>"
         )
+
+        if photo:
+            if photo.startswith("http://") or photo.startswith("https://"):
+                results.append(
+                    InlineQueryResultPhoto(
+                        id=c_id,
+                        photo_url=photo,
+                        thumbnail_url=photo,
+                        caption=caption,
+                        parse_mode="HTML"
+                    )
+                )
+            else:
+                try:
+                    results.append(
+                        InlineQueryResultCachedPhoto(
+                            id=c_id,
+                            photo_file_id=photo,
+                            caption=caption,
+                            parse_mode="HTML"
+                        )
+                    )
+                except Exception:
+                    results.append(
+                        InlineQueryResultArticle(
+                            id=c_id,
+                            title=f"🎴 {c_name} [{tier}]",
+                            description=f"Tier: {tier} | Worth: {worth} SS",
+                            input_message_content=InputTextMessageContent(caption, parse_mode="HTML")
+                        )
+                    )
+        else:
+            results.append(
+                InlineQueryResultArticle(
+                    id=c_id,
+                    title=f"🎴 {c_name} [{tier}]",
+                    description=f"Tier: {tier} | Worth: {worth} SS",
+                    input_message_content=InputTextMessageContent(caption, parse_mode="HTML")
+                )
+            )
+
+    if not results and query_text:
+        results.append(
+            InlineQueryResultArticle(
+                id="no_result",
+                title="❌ No cards found",
+                description=f"No cards matching '{query_text}' found in global pool.",
+                input_message_content=InputTextMessageContent(
+                    f"❌ No cards matching '<b>{escape_html(query_text)}</b>' found in global card pool.",
+                    parse_mode="HTML"
+                )
+            )
+        )
+
+    await inline_query.answer(results, cache_time=5)
 
         results.append(
             InlineQueryResultArticle(
@@ -2780,7 +2824,7 @@ async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 async def removecard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Removes a card from user's roster by code."""
+    """Owner command to delete a card from the global database pool, or user command to remove from roster."""
     if not update.message or not update.message.from_user:
         return
 
@@ -2790,14 +2834,48 @@ async def removecard_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     args = context.args or []
     if not args:
-        await update.message.reply_text("⚠️ Usage: <code>/removecard &lt;4-digit_code&gt;</code> (e.g. <code>/removecard 1234</code>)", parse_mode='HTML')
+        await update.message.reply_text(
+            "⚠️ Usage:\n"
+            "• Owner: <code>/removecard &lt;card_pool_id_or_name&gt;</code> (Deletes from global database pool)\n"
+            "• User: <code>/removecard &lt;4-digit_code&gt;</code> (Removes from roster)",
+            parse_mode='HTML'
+        )
         return
 
-    code = args[0].strip()
-    card = user_cards_db.get(code)
+    target = args[0].strip()
 
+    # If owner is trying to delete from global cards pool
+    if is_owner(user.id):
+        matched_pool_card = None
+        for c in cards_pool_db:
+            if c.get("id", "").lower() == target.lower() or c.get("name", "").lower() == target.lower():
+                matched_pool_card = c
+                break
+
+        if matched_pool_card:
+            card_id = matched_pool_card["id"]
+            c_name = escape_html(matched_pool_card.get("name", "Card"))
+            cards_pool_db[:] = [c for c in cards_pool_db if c.get("id") != card_id]
+            save_cards_pool(cards_pool_db)
+
+            db = get_mongo_db()
+            if db is not None:
+                try:
+                    db["cards_pool"].delete_one({"_id": card_id})
+                except Exception as e:
+                    logger.error(f"Error deleting card pool item {card_id} from MongoDB: {e}")
+
+            await update.message.reply_text(
+                f"🗑️ <b>GLOBAL DATABASE CARD DELETED!</b>\n\n"
+                f"Card <b>{c_name}</b> (Pool ID: <code>{card_id}</code>) has been permanently deleted from the bot database pool.",
+                parse_mode='HTML'
+            )
+            return
+
+    # Otherwise, treat as 4-digit roster code for user (or owner roster card)
+    card = user_cards_db.get(target.upper())
     if not card:
-        await update.message.reply_text(f"❌ Card code <code>{code}</code> not found in your roster!", parse_mode='HTML')
+        await update.message.reply_text(f"❌ Card code or pool ID <code>{target}</code> not found in your roster or global database!", parse_mode='HTML')
         return
 
     if card.get("owner_id") != user.id and not is_owner(user.id):
@@ -2805,20 +2883,20 @@ async def removecard_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     c_name = escape_html(card.get("name", "Card"))
-    user_cards_db.pop(code, None)
+    user_cards_db.pop(target.upper(), None)
 
     db = get_mongo_db()
     if db is not None:
         try:
-            db["user_cards"].delete_one({"_id": code})
+            db["user_cards"].delete_one({"_id": target.upper()})
         except Exception as e:
-            logger.error(f"Error removing card {code} from MongoDB: {e}")
+            logger.error(f"Error removing card {target} from MongoDB: {e}")
 
     save_user_cards(user_cards_db)
 
     await update.message.reply_text(
-        f"🗑️ <b>CARD REMOVED!</b>\n\n"
-        f"Card <b>{c_name}</b> (Code: <code>{code}</code>) has been removed from the crew/roster.",
+        f"🗑️ <b>CARD REMOVED FROM ROSTER!</b>\n\n"
+        f"Card <b>{c_name}</b> (Code: <code>{target.upper()}</code>) has been removed from the crew/roster.",
         parse_mode='HTML'
     )
 
