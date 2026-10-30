@@ -105,11 +105,11 @@
                             <span class="text-[10px] text-purple-400">/summon</span>
                         </div>
                     </button>
-                    <button onclick="sendBotCommand('/daily')" class="glass-card hover:bg-slate-800/80 border border-purple-500/20 p-3 rounded-xl text-left transition flex items-center space-x-2.5 group">
+                    <button onclick="claimDaily()" class="glass-card hover:bg-slate-800/80 border border-purple-500/20 p-3 rounded-xl text-left transition flex items-center space-x-2.5 group">
                         <span class="text-xl group-hover:scale-110 transition">🎁</span>
                         <div>
                             <span class="block text-xs font-bold text-slate-200">Daily Claim</span>
-                            <span class="text-[10px] text-purple-400">/daily</span>
+                            <span class="text-[10px] text-purple-400">+500 SS & Card</span>
                         </div>
                     </button>
                 </div>
@@ -292,6 +292,26 @@
                     tg.showAlert(`Successfully bought ${data.pill_name}!`);
                 } else {
                     tg.showAlert(data.message || 'Purchase failed!');
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function claimDaily() {
+            try {
+                const res = await fetch('/api/daily', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({user_id: userId})
+                });
+                const data = await res.json();
+                if (data.success) {
+                    appData = data.app_data;
+                    updateUI();
+                    tg.showAlert(data.message);
+                } else {
+                    tg.showAlert(data.message || 'Already claimed today!');
                 }
             } catch (e) {
                 console.error(e);

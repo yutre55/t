@@ -3788,6 +3788,55 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(response).encode("utf-8"))
             return
 
+        elif path == "/api/daily":
+            user_id = int(req.get("user_id", 0))
+            if not user_id:
+                response = {"success": False, "message": "Invalid user ID"}
+            else:
+                eco = get_user_economy(user_id)
+                now = time.time()
+                last_daily = eco.get("last_daily", 0.0)
+                cooldown = 24 * 3600
+                time_passed = now - last_daily
+
+                if time_passed < cooldown:
+                    remaining_sec = cooldown - time_passed
+                    hours = int(remaining_sec // 3600)
+                    mins = int((remaining_sec % 3600) // 60)
+                    response = {"success": False, "message": f"⏳ Daily reward already claimed! Please wait {hours}h {mins}m."}
+                else:
+                    eco["spirit_stones"] += 500
+                    eco["last_daily"] = now
+                    save_user_economy(user_economy_db)
+
+                    mortal_card = create_card_instance(user_id, forced_tier="Mortal")
+
+                    user_cards = [c for c in user_cards_db.values() if c.get("owner_id") == user_id]
+                    total_pool_count = len(cards_pool_db)
+                    owned_card_names = {c.get("name", "").strip().lower() for c in user_cards}
+                    unique_owned_count = sum(1 for b in cards_pool_db if b.get("name", "").strip().lower() in owned_card_names) if total_pool_count > 0 else len(owned_card_names)
+                    completion_pct = round((unique_owned_count / total_pool_count * 100.0) if total_pool_count > 0 else 0.0, 1)
+
+                    cards_list = [{"code": c.get("code"), "name": c.get("name"), "tier": c.get("tier"), "worth": get_card_worth(c), "stay_time": format_time_left(c)} for c in user_cards]
+
+                    app_data = {
+                        "spirit_stones": eco["spirit_stones"],
+                        "pills": eco.get("pills", {}),
+                        "pill_catalog": PILL_CATALOG,
+                        "roster_count": len(user_cards),
+                        "unique_collected": unique_owned_count,
+                        "total_pool": total_pool_count,
+                        "completion_pct": completion_pct,
+                        "user_cards": cards_list
+                    }
+                    response = {"success": True, "message": f"💎 Daily Claimed! +500 SS & Mortal Card ({mortal_card['name']})", "app_data": app_data}
+
+            self.send_response(200)
+            self.send_header("Content-type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(response).encode("utf-8"))
+            return
+
         elif path == "/api/mine/start":
             user_id = int(req.get("user_id", 0))
             bet = int(req.get("bet", 50))
