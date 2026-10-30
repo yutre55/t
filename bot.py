@@ -1219,7 +1219,7 @@ PILL_KEYWORD_MAP = {
 }
 
 async def pillshop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Displays Pill Shop catalog."""
+    """Displays Pill Shop catalog with inline buy buttons."""
     if not update.message or not update.message.from_user:
         return
 
@@ -1229,23 +1229,25 @@ async def pillshop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     ss_bal = eco["spirit_stones"]
 
     shop_lines = []
+    keyboard_buttons = []
+
     for num, item in PILL_CATALOG.items():
-        shop_lines.append(f"<b>{num}. {item['name']}</b>\n   • Effect: <code>{item['desc']}</code>\n   • Price: <code>{item['price']} SS</code>")
+        cnt = eco.get("pills", {}).get(item["name"], 0)
+        shop_lines.append(f"<b>{num}. {item['name']}</b> (Owned: {cnt})\n   • Effect: <code>{item['desc']}</code>\n   • Price: <code>{item['price']} SS</code>")
+        keyboard_buttons.append([InlineKeyboardButton(f"🛒 Buy {item['name']} ({item['price']} SS)", callback_data=f"buy_pill_{num}")])
 
     shop_text = "\n\n".join(shop_lines)
+    keyboard = InlineKeyboardMarkup(keyboard_buttons)
 
     text = (
         f"💊 <b>CULTIVATION PILL SHOP</b>\n\n"
         f"💰 <b>Your Spirit Stones Balance:</b> <code>{ss_bal} SS</code>\n\n"
         f"{shop_text}\n\n"
-        f"🛒 <b>Commands:</b>\n"
-        f"• Buy pills: <code>/buy &lt;qi|jade|heavenly|emperor|longevity|eternal|num&gt; [qty]</code>\n"
-        f"• Example: <code>/buy qi 2</code> or <code>/buy eternal</code>\n"
-        f"• Check stock: <code>/inventory</code>\n"
-        f"• Feed card: <code>/cultivate &lt;card_code&gt; &lt;pill&gt;</code>"
+        f"👇 <b>Tap an inline button below to buy pills instantly!</b>\n"
+        f"<i>(Or use command: <code>/buy &lt;pill&gt; [qty]</code>)</i>"
     )
 
-    await update.message.reply_text(text, parse_mode='HTML')
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
 
 async def buypill_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Purchases pills using Spirit Stones."""
@@ -1336,7 +1338,7 @@ async def inventory_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
 
 async def cultivate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Feeds pill to card to extend stay duration or make permanent."""
+    """Feeds pill to card to extend stay duration or make permanent, with inline selection."""
     if not update.message or not update.message.from_user:
         return
 
@@ -1346,22 +1348,64 @@ async def cultivate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     eco = get_user_economy(user.id)
 
     args = context.args or []
-    if len(args) < 2:
+    if not args:
         await update.message.reply_text(
-            "⚠️ Usage: <code>/cultivate &lt;card_code&gt; &lt;pill_number_or_name&gt;</code>\n"
-            "Example: <code>/cultivate X82K 1</code> or <code>/cultivate X82K Eternal Life Pill</code>",
+            "⚠️ Usage: <code>/cultivate &lt;card_code&gt; [pill_name_or_num]</code>\n"
+            "Example: <code>/cultivate 1234</code> (opens pill selection buttons!)",
             parse_mode='HTML'
         )
         return
 
     code = args[0].strip().upper()
-    pill_query = " ".join(args[1:]).strip().lower()
-
     card = user_cards_db.get(code)
+
     if not card or card.get("owner_id") != user.id:
         await update.message.reply_text(f"❌ Card code <code>{code}</code> not found in your roster!", parse_mode='HTML')
         return
 
+    pills = eco.get("pills", {})
+
+    # IF NO SECOND ARGUMENT GIVEN, SHOW INLINE SELECTION BUTTONS FOR ALL OWNED PILLS!
+    if len(args) == 1:
+        owned_pills = []
+        keyboard_buttons = []
+
+        for num, item in PILL_CATALOG.items():
+            pname = item["name"]
+            cnt = pills.get(pname, 0)
+            if cnt > 0:
+                owned_pills.append((num, item, cnt))
+                keyboard_buttons.append([InlineKeyboardButton(f"💊 {pname} ({cnt} in stock)", callback_data=f"cult_{code}_{num}")])
+
+        if not owned_pills:
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Open Pill Shop", callback_data="open_pillshop")]])
+            await update.message.reply_text(
+                f"❌ <b>You don't have any pills in your inventory!</b>\n\n"
+                f"Tap the button below to buy pills from the shop:",
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
+            return
+
+        keyboard_buttons.append([InlineKeyboardButton("❌ Cancel", callback_data="cult_cancel")])
+        keyboard = InlineKeyboardMarkup(keyboard_buttons)
+
+        c_name = escape_html(card.get("name"))
+        tier_str = TIER_EMOJIS.get(card.get("tier"), card.get("tier"))
+        current_stay = format_time_left(card)
+
+        await update.message.reply_text(
+            f"✨ <b>SELECT A PILL TO CULTIVATE CARD</b>\n\n"
+            f"🎴 <b>Card:</b> {tier_str} - <b>{c_name}</b> (Code: <code>{code}</code>)\n"
+            f"⏳ <b>Current Stay Limit:</b> <code>{current_stay}</code>\n\n"
+            f"👇 <b>Select a pill below to feed to this card:</b>",
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+        return
+
+    # Direct pill provided via text
+    pill_query = " ".join(args[1:]).strip().lower()
     target_item = None
     for num, item in PILL_CATALOG.items():
         if pill_query == num or pill_query in item["name"].lower():
@@ -1373,7 +1417,7 @@ async def cultivate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
 
     pill_name = target_item["name"]
-    owned_count = eco.get("pills", {}).get(pill_name, 0)
+    owned_count = pills.get(pill_name, 0)
 
     if owned_count <= 0:
         await update.message.reply_text(
@@ -1382,7 +1426,7 @@ async def cultivate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return
 
-    eco["pills"][pill_name] -= 1
+    pills[pill_name] -= 1
     save_user_economy(user_economy_db)
 
     now = time.time()
@@ -1420,19 +1464,15 @@ async def finalize_add_card(update: Update, user_id: int, tier: str, char_name: 
     cards_pool_db.append(new_base_card)
     save_cards_pool(cards_pool_db)
 
-    test_card = create_card_instance(user_id, forced_tier=tier)
-    test_card["name"] = char_name
-    test_card["photo"] = photo
-    save_user_cards(user_cards_db)
-
     tier_emoji = TIER_EMOJIS.get(tier, tier)
 
     text = (
         f"✅ <b>NEW CARD ADDED TO GLOBAL POOL!</b> 🎉\n\n"
         f"⚔️ <b>Character Name:</b> <b>{escape_html(char_name)}</b>\n"
         f"✨ <b>Tier:</b> {tier_emoji}\n"
-        f"🔑 <b>Sample Roster Code:</b> <code>{test_card['code']}</code>\n\n"
-        f"Total Base Pool Size: <code>{len(cards_pool_db)} cards</code>"
+        f"🆔 <b>Card Pool ID:</b> <code>{card_id}</code>\n\n"
+        f"Total Base Pool Size: <code>{len(cards_pool_db)} cards</code>\n"
+        f"💡 <i>This card is now in the global pool and can be recruited by players when summoned/dropped!</i>"
     )
 
     if photo and update.message:
@@ -1575,6 +1615,140 @@ async def addcard_callback_handler(update: Update, context: ContextTypes.DEFAULT
             f"🏷️ <b>Selected Tier:</b> {symbol} {selected_tier}\n\n"
             f"✏️ <b>3rd: Now type and send the Character Name in chat:</b>\n"
             f"<i>(e.g. Xiao Yan, Tanjiro, Gojo Satoru)</i>",
+            parse_mode='HTML'
+        )
+        return
+
+async def pill_cultivate_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.from_user:
+        return
+
+    user = query.from_user
+    user_id = user.id
+    track_user_data(user)
+    data = query.data or ""
+    await query.answer()
+
+    if data == "cult_cancel":
+        await query.edit_message_text("❌ <b>Cultivation Canceled!</b>", parse_mode='HTML')
+        return
+
+    if data == "open_pillshop":
+        eco = get_user_economy(user_id)
+        ss_bal = eco["spirit_stones"]
+
+        shop_lines = []
+        keyboard_buttons = []
+
+        for num, item in PILL_CATALOG.items():
+            cnt = eco.get("pills", {}).get(item["name"], 0)
+            shop_lines.append(f"<b>{num}. {item['name']}</b> (Owned: {cnt})\n   • Effect: <code>{item['desc']}</code>\n   • Price: <code>{item['price']} SS</code>")
+            keyboard_buttons.append([InlineKeyboardButton(f"🛒 Buy {item['name']} ({item['price']} SS)", callback_data=f"buy_pill_{num}")])
+
+        shop_text = "\n\n".join(shop_lines)
+        keyboard = InlineKeyboardMarkup(keyboard_buttons)
+
+        text = (
+            f"💊 <b>CULTIVATION PILL SHOP</b>\n\n"
+            f"💰 <b>Your Spirit Stones Balance:</b> <code>{ss_bal} SS</code>\n\n"
+            f"{shop_text}\n\n"
+            f"👇 <b>Tap an inline button below to buy pills instantly!</b>"
+        )
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+        return
+
+    # Handle Pill Shop inline buy buttons
+    if data.startswith("buy_pill_"):
+        num = data.replace("buy_pill_", "")
+        item = PILL_CATALOG.get(num)
+        if not item:
+            await query.answer("❌ Invalid pill!", show_alert=True)
+            return
+
+        eco = get_user_economy(user_id)
+        price = item["price"]
+        pill_name = item["name"]
+
+        if eco["spirit_stones"] < price:
+            await query.answer(f"❌ Insufficient Spirit Stones! Required: {price} SS | Balance: {eco['spirit_stones']} SS", show_alert=True)
+            return
+
+        eco["spirit_stones"] -= price
+        eco["pills"][pill_name] = eco["pills"].get(pill_name, 0) + 1
+        save_user_economy(user_economy_db)
+
+        # Refresh shop message with updated SS balance
+        ss_bal = eco["spirit_stones"]
+        shop_lines = []
+        keyboard_buttons = []
+
+        for p_num, p_item in PILL_CATALOG.items():
+            cnt = eco["pills"].get(p_item["name"], 0)
+            shop_lines.append(f"<b>{p_num}. {p_item['name']}</b> (Owned: {cnt})\n   • Effect: <code>{p_item['desc']}</code>\n   • Price: <code>{p_item['price']} SS</code>")
+            keyboard_buttons.append([InlineKeyboardButton(f"🛒 Buy {p_item['name']} ({p_item['price']} SS)", callback_data=f"buy_pill_{p_num}")])
+
+        shop_text = "\n\n".join(shop_lines)
+        keyboard = InlineKeyboardMarkup(keyboard_buttons)
+
+        text = (
+            f"✅ <b>Bought 1x {pill_name}!</b> 🎉\n\n"
+            f"💊 <b>CULTIVATION PILL SHOP</b>\n\n"
+            f"💰 <b>Your Spirit Stones Balance:</b> <code>{ss_bal} SS</code>\n\n"
+            f"{shop_text}\n\n"
+            f"👇 <b>Tap an inline button below to buy pills instantly!</b>"
+        )
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+        return
+
+    # Handle Cultivate Pill inline feed buttons (cult_<code>_<num>)
+    if data.startswith("cult_"):
+        parts = data.split("_")
+        if len(parts) < 3:
+            return
+
+        code = parts[1]
+        num = parts[2]
+
+        card = user_cards_db.get(code)
+        if not card or card.get("owner_id") != user_id:
+            await query.edit_message_text(f"❌ Card <code>{code}</code> not found in your roster!", parse_mode='HTML')
+            return
+
+        target_item = PILL_CATALOG.get(num)
+        if not target_item:
+            await query.answer("❌ Invalid pill!", show_alert=True)
+            return
+
+        pill_name = target_item["name"]
+        eco = get_user_economy(user_id)
+        pills = eco.get("pills", {})
+
+        if pills.get(pill_name, 0) <= 0:
+            await query.answer(f"❌ You don't have any {pill_name} in stock!", show_alert=True)
+            return
+
+        pills[pill_name] -= 1
+        save_user_economy(user_economy_db)
+
+        now = time.time()
+        if target_item["seconds"] == -1:
+            card["is_permanent"] = True
+        else:
+            current_expire = max(now, card.get("expire_at", now))
+            card["expire_at"] = current_expire + target_item["seconds"]
+
+        save_user_cards(user_cards_db)
+
+        c_name = escape_html(card.get("name"))
+        tier_str = TIER_EMOJIS.get(card.get("tier"), card.get("tier"))
+        new_time_left = format_time_left(card)
+
+        await query.edit_message_text(
+            f"✨ <b>CULTIVATION SUCCESSFUL!</b> 🧘‍♂️\n\n"
+            f"🎴 <b>Card:</b> {tier_str} - <b>{c_name}</b> (Code: <code>{code}</code>)\n"
+            f"💊 <b>Fed Pill:</b> {pill_name}\n"
+            f"⏳ <b>New Stay Limit:</b> <code>{new_time_left}</code>",
             parse_mode='HTML'
         )
         return
@@ -1803,6 +1977,94 @@ async def swap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         parse_mode='HTML'
     )
 
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays user's game progress, Spirit Stones balance, card collection, and completion percentage."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    clean_expired_cards()
+
+    eco = get_user_economy(user.id)
+    ss_bal = eco["spirit_stones"]
+    uname = escape_html(user.first_name)
+
+    # Fetch user's cards
+    user_cards = [c for c in user_cards_db.values() if c.get("owner_id") == user.id]
+    total_roster_cards = len(user_cards)
+
+    # Calculate collection progress against global cards_pool_db
+    total_pool_count = len(cards_pool_db)
+
+    # Set of user's owned card names & tiers
+    user_owned_set = {
+        (c.get("name", "").strip().lower(), c.get("tier", "").strip().lower())
+        for c in user_cards
+    }
+
+    # Unique base cards matched
+    unique_owned_count = 0
+    tier_progress: Dict[str, Dict[str, int]] = {
+        "Mortal": {"owned": 0, "total": 0},
+        "Awakened": {"owned": 0, "total": 0},
+        "Transcendent": {"owned": 0, "total": 0},
+        "Celestial": {"owned": 0, "total": 0},
+        "Primordial": {"owned": 0, "total": 0}
+    }
+
+    for base_card in cards_pool_db:
+        b_name = base_card.get("name", "").strip().lower()
+        b_tier = base_card.get("tier", "Mortal").capitalize()
+
+        if b_tier not in tier_progress:
+            tier_progress[b_tier] = {"owned": 0, "total": 0}
+
+        tier_progress[b_tier]["total"] += 1
+
+        if (b_name, b_tier.lower()) in user_owned_set:
+            unique_owned_count += 1
+            tier_progress[b_tier]["owned"] += 1
+
+    # Calculate completion percentage
+    if total_pool_count > 0:
+        completion_pct = (unique_owned_count / total_pool_count) * 100.0
+    else:
+        completion_pct = 0.0
+
+    # Build tier breakdown string
+    tier_lines = []
+    for t_name in ["Primordial", "Celestial", "Transcendent", "Awakened", "Mortal"]:
+        t_data = tier_progress.get(t_name, {"owned": 0, "total": 0})
+        t_owned = t_data["owned"]
+        t_total = t_data["total"]
+        emoji = TIER_EMOJIS.get(t_name, t_name)
+        if t_total > 0:
+            t_pct = (t_owned / t_total) * 100.0
+            tier_lines.append(f"  • {emoji}: <b>{t_owned}/{t_total}</b> (<code>{t_pct:.1f}%</code>)")
+        else:
+            tier_lines.append(f"  • {emoji}: <b>0/0</b> (<code>N/A</code>)")
+
+    tier_str = "\n".join(tier_lines)
+
+    progress_bar_length = 10
+    filled_blocks = int((completion_pct / 100.0) * progress_bar_length)
+    progress_bar = "🟩" * filled_blocks + "⬜" * (progress_bar_length - filled_blocks)
+
+    text = (
+        f"📊 <b>CULTIVATOR GAME STATUS: {uname}</b>\n\n"
+        f"💎 <b>Spirit Stones (SS):</b> <code>{ss_bal} SS</code>\n"
+        f"🎴 <b>Roster Cards Owned:</b> <code>{total_roster_cards} cards</code>\n"
+        f"🎯 <b>Unique Cards Collected:</b> <code>{unique_owned_count}/{total_pool_count} base cards</code>\n"
+        f"🏆 <b>Game Completion:</b> <b>{completion_pct:.1f}%</b>\n"
+        f"[{progress_bar}]\n\n"
+        f"🏷️ <b>Collection Progress by Tier:</b>\n"
+        f"{tier_str}\n\n"
+        f"💡 <i>Tip: Recruited cards increase your completion %! When new cards are added to the pool, completion % adjusts automatically.</i>"
+    )
+
+    await update.message.reply_text(text, parse_mode='HTML')
+
 async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Claims a card dropped via /summon or 100-msg group drop."""
     if not update.message or not update.message.from_user:
@@ -1884,6 +2146,64 @@ async def removecard_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode='HTML'
     )
 
+async def discard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Discards a card from user's roster and converts it to Spirit Stones (SS)."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    clean_expired_cards()
+
+    args = context.args or []
+    if not args:
+        await update.message.reply_text(
+            "⚠️ Usage: <code>/discard &lt;4-digit_code&gt;</code> (e.g. <code>/discard 1234</code>)\n"
+            "<i>Note: Discarding a card permanently removes it from your roster and refunds its Worth in Spirit Stones (SS)!</i>",
+            parse_mode='HTML'
+        )
+        return
+
+    code = args[0].strip()
+    card = user_cards_db.get(code)
+
+    if not card or card.get("owner_id") != user.id:
+        await update.message.reply_text(f"❌ Card code <code>{code}</code> was not found in your roster!", parse_mode='HTML')
+        return
+
+    c_name = escape_html(card.get("name", "Cultivator"))
+    tier_name = card.get("tier", "Mortal")
+    tier_emoji = TIER_EMOJIS.get(tier_name, tier_name)
+    worth = get_card_worth(card)
+
+    # Delete card from roster
+    user_cards_db.pop(code, None)
+    db = get_mongo_db()
+    if db is not None:
+        try:
+            db["user_cards"].delete_one({"_id": code})
+        except Exception as e:
+            logger.error(f"Error deleting discarded card {code} from MongoDB: {e}")
+
+    save_user_cards(user_cards_db)
+
+    # Add Spirit Stones worth to user economy
+    eco = get_user_economy(user.id)
+    eco["spirit_stones"] += worth
+    save_user_economy(user_economy_db)
+
+    uname = escape_html(user.first_name)
+    new_ss_bal = eco["spirit_stones"]
+
+    await update.message.reply_text(
+        f"♻️ <b>CARD DISCARDED FOR SPIRIT STONES!</b> 💎\n\n"
+        f"👤 <b>Cultivator:</b> {uname}\n"
+        f"🎴 <b>Discarded:</b> {tier_emoji} - <b>{c_name}</b> (Code: <code>{code}</code>)\n"
+        f"💰 <b>Spirit Stones Received:</b> <code>+{worth} SS</code> 💎\n"
+        f"💎 <b>New SS Balance:</b> <code>{new_ss_bal} SS</code>",
+        parse_mode='HTML'
+    )
+
 async def allcards_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Displays all character cards in the global base pool."""
     if not update.message:
@@ -1946,6 +2266,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "• <code>/recruit</code> / <code>/claim</code> / <code>/grab</code> - Bring dropped card into your crew.\n"
         "• <code>/mycards</code> / <code>/roster</code> - View your owned cards and stay limits.\n"
         "• <code>/showcard &lt;code&gt;</code> - View card details (Name, Worth, Tier, Stay Time).\n"
+        "• <code>/discard &lt;code&gt;</code> - Discard a card to receive Spirit Stones (SS) equal to its worth.\n"
         "• <code>/removecard &lt;code&gt;</code> - Remove/release a card from your crew.\n"
         "• <code>/allcards</code> - View all cards available in the global card pool.\n"
         "• <code>/daily</code> - Claim daily 500 Spirit Stones (SS) + 1 Bonus Mortal Card.\n"
@@ -2612,6 +2933,7 @@ def main():
     app.add_handler(CommandHandler("mycards", mycards_command))
     app.add_handler(CommandHandler("roster", mycards_command))
     app.add_handler(CommandHandler("showcard", showcard_command))
+    app.add_handler(CommandHandler("discard", discard_command))
     app.add_handler(CommandHandler("removecard", removecard_command))
     app.add_handler(CommandHandler("allcards", allcards_command))
     app.add_handler(CommandHandler("daily", daily_command))
@@ -2628,8 +2950,9 @@ def main():
     app.add_handler(CommandHandler("recruit", claim_command))
     app.add_handler(CommandHandler("grab", claim_command))
 
-    # Callback Queries Handler (For /addcard Wizard Inline Buttons)
+    # Callback Queries Handler (For /addcard Wizard & Cultivation Inline Buttons)
     app.add_handler(CallbackQueryHandler(addcard_callback_handler, pattern="^addcard_"))
+    app.add_handler(CallbackQueryHandler(pill_cultivate_callback_handler, pattern="^(buy_pill_|cult_|open_pillshop)"))
 
     # Photo Messages Handler (For /addcard Wizard Photo Upload)
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
