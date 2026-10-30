@@ -1377,74 +1377,152 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         parse_mode='HTML'
     )
 
-async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles inline queries (@botusername <card_name>) to search cards and show card images."""
-    inline_query = update.inline_query
-    if not inline_query:
+async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Searches for a card by name using /search <name>, shows selection if multiple match, and displays card image with details and owner count."""
+    if not update.message or not update.message.from_user:
         return
 
-    query_text = inline_query.query.strip().lower()
-    if not query_text:
-        await inline_query.answer([], cache_time=5)
+    user = update.message.from_user
+    track_user_data(user)
+    clean_expired_cards()
+
+    args = context.args or []
+    if not args:
+        await update.message.reply_text("⚠️ Usage: <code>/search &lt;card_name&gt;</code> (e.g. <code>/search cheon</code>)", parse_mode='HTML')
         return
 
-    results = []
-    seen_names = set()
-    all_cards = []
+    query_text = " ".join(args).strip().lower()
 
-    for card in cards_pool_db:
-        name = card.get("name", "").strip()
-        if name.lower() not in seen_names:
-            seen_names.add(name.lower())
-            all_cards.append(card)
+    matched_names = set()
+    for c in cards_pool_db:
+        cname = c.get("name", "").strip()
+        if query_text in cname.lower():
+            matched_names.add(cname)
 
-    for card in user_cards_db.values():
-        name = card.get("name", "").strip()
-        if name.lower() not in seen_names:
-            seen_names.add(name.lower())
-            all_cards.append(card)
+    for c in user_cards_db.values():
+        cname = c.get("name", "").strip()
+        if query_text in cname.lower():
+            matched_names.add(cname)
 
-    matched_cards = [c for c in all_cards if query_text in c.get("name", "").lower()]
+    unique_matches = sorted(list(matched_names))
+
+    if not unique_matches:
+        await update.message.reply_text(f"❌ No cards matching '<b>{escape_html(query_text)}</b>' found in database!", parse_mode='HTML')
+        return
+
+    if len(unique_matches) > 1:
+        keyboard_buttons = []
+        for idx, mname in enumerate(unique_matches[:10], start=1):
+            keyboard_buttons.append([InlineKeyboardButton(f"{idx}. {mname}", callback_data=f"search_card_{idx-1}_{query_text}")])
+
+        keyboard = InlineKeyboardMarkup(keyboard_buttons)
+        match_list_str = "\n".join([f"<b>{idx}.</b> {mname}" for idx, mname in enumerate(unique_matches[:10], start=1)])
+
+        await update.message.reply_text(
+            f"🔍 <b>Multiple cards found matching '{escape_html(query_text)}':</b>\n\n"
+            f"{match_list_str}\n\n"
+            f"👇 <i>Please select by tapping 1st, 2nd, 3rd, etc. below:</i>",
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+        return
+
+    selected_name = unique_matches[0]
+    await send_card_search_result(update.message, selected_name)
+
+async def send_card_search_result(message, card_name: str) -> None:
+    card_obj = None
+    for c in cards_pool_db:
+        if c.get("name", "").strip().lower() == card_name.lower():
+            card_obj = c
+            break
+    if not card_obj:
+        for c in user_cards_db.values():
+            if c.get("name", "").strip().lower() == card_name.lower():
+                card_obj = c
+                break
+
+    if not card_obj:
+        await message.reply_text(f"❌ Card '<b>{escape_html(card_name)}</b>' not found!", parse_mode='HTML')
+        return
+
+    c_name = escape_html(card_obj.get("name", "Cultivator"))
+    tier = card_obj.get("tier", "Mortal")
+    tier_emoji = TIER_EMOJIS.get(tier, tier)
+    worth = get_card_worth(card_obj)
+    photo = card_obj.get("photo", "")
+
+    owners = [c for c in user_cards_db.values() if c.get("name", "").strip().lower() == card_name.lower()]
+    owner_count = len(owners)
+    owner_handles = []
+    for o in owners:
+        uid = o.get("owner_id")
+        u_info = users_db.get(str(uid), {})
+        handle = f"@{u_info.get('username')}" if u_info.get("username") else u_info.get("first_name", f"User {uid}")
+        if handle not in owner_handles:
+            owner_handles.append(handle)
+
+    owners_str = ", ".join(owner_handles[:5]) if owner_handles else "None"
+    if len(owner_handles) > 5:
+        owners_str += f" and {len(owner_handles) - 5} others"
+
+    caption = (
+        f"⚔️ <b>Name:</b> {c_name}\n"
+        f"✨ <b>Tier:</b> {tier_emoji}\n"
+        f"💎 <b>Worth:</b> <code>{worth} SS</code>\n"
+        f"👥 <b>Owned by:</b> <code>{owner_count} cultivators</code> ({owners_str})"
+    )
+
     fallback_img = "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=600&auto=format&fit=crop&q=80"
+    photo_url = photo if (photo and (photo.startswith("http://") or photo.startswith("https://"))) else fallback_img
 
-    for idx, card in enumerate(matched_cards[:20]):
-        c_id = card.get("id", card.get("code", f"card_{idx}"))
-        c_name = card.get("name", "Cultivator")
-        tier = card.get("tier", "Mortal")
-        tier_emoji = TIER_EMOJIS.get(tier, tier)
-        photo = card.get("photo", "")
+    if photo and not photo.startswith("http"):
+        try:
+            await message.reply_photo(photo=photo, caption=caption, parse_mode='HTML')
+            return
+        except Exception:
+            pass
 
-        photo_url = photo if (photo and (photo.startswith("http://") or photo.startswith("https://"))) else fallback_img
+    try:
+        await message.reply_photo(photo=photo_url, caption=caption, parse_mode='HTML')
+    except Exception:
+        await message.reply_text(caption, parse_mode='HTML')
 
-        caption = (
-            f"⚔️ <b>Name:</b> {escape_html(c_name)}\n"
-            f"✨ <b>Tier:</b> {tier_emoji}"
-        )
+async def search_card_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.from_user:
+        return
 
-        results.append(
-            InlineQueryResultPhoto(
-                id=str(c_id),
-                photo_url=photo_url,
-                thumbnail_url=photo_url,
-                caption=caption,
-                parse_mode="HTML"
-            )
-        )
+    data = query.data or ""
+    await query.answer()
 
-    if not results and query_text:
-        results.append(
-            InlineQueryResultArticle(
-                id="no_result",
-                title="❌ No cards found",
-                description=f"No cards matching '{query_text}' found.",
-                input_message_content=InputTextMessageContent(
-                    f"❌ No cards matching '<b>{escape_html(query_text)}</b>' found.",
-                    parse_mode="HTML"
-                )
-            )
-        )
+    if data.startswith("search_card_"):
+        parts = data.split("_")
+        if len(parts) >= 4:
+            try:
+                idx = int(parts[2])
+                query_text = "_".join(parts[3:]).strip().lower()
+            except ValueError:
+                return
 
-    await inline_query.answer(results, cache_time=5)
+            matched_names = set()
+            for c in cards_pool_db:
+                cname = c.get("name", "").strip()
+                if query_text in cname.lower():
+                    matched_names.add(cname)
+            for c in user_cards_db.values():
+                cname = c.get("name", "").strip()
+                if query_text in cname.lower():
+                    matched_names.add(cname)
+
+            unique_matches = sorted(list(matched_names))
+            if 0 <= idx < len(unique_matches):
+                selected_name = unique_matches[idx]
+                try:
+                    await query.message.delete()
+                except Exception:
+                    pass
+                await send_card_search_result(query.message, selected_name)
 
 async def daily_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Claims daily free 500 Spirit Stones (SS) + 1 Mortal Card."""
@@ -3973,6 +4051,7 @@ def main():
     app.add_handler(CommandHandler("mycards", mycards_command))
     app.add_handler(CommandHandler("roster", mycards_command))
     app.add_handler(CommandHandler("showcard", showcard_command))
+    app.add_handler(CommandHandler("search", search_command))
     app.add_handler(CommandHandler("discard", discard_command))
     app.add_handler(CommandHandler("removecard", removecard_command))
     app.add_handler(CommandHandler("allcards", allcards_command))
@@ -3999,9 +4078,7 @@ def main():
     app.add_handler(CallbackQueryHandler(pill_cultivate_callback_handler, pattern="^(buy_pill_|cult_|open_pillshop)"))
     app.add_handler(CallbackQueryHandler(mines_callback_handler, pattern="^mines_"))
     app.add_handler(CallbackQueryHandler(mycards_callback_handler, pattern="^mycards_"))
-
-    # Inline Query Handler (For @botusername <card_name> card ownership search)
-    app.add_handler(InlineQueryHandler(inline_query_handler))
+    app.add_handler(CallbackQueryHandler(search_card_callback_handler, pattern="^search_card_"))
 
     # Photo Messages Handler (For /addcard Wizard Photo Upload)
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
