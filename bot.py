@@ -13,8 +13,8 @@ import pymongo
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import List, Dict, Set, Optional
 from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
 from openai import AsyncOpenAI
 
 # Setup logging
@@ -1406,8 +1406,47 @@ async def cultivate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         parse_mode='HTML'
     )
 
+owner_addcard_sessions: Dict[int, Dict] = {}  # user_id -> {"step": str, "photo": str, "tier": str}
+
+async def finalize_add_card(update: Update, user_id: int, tier: str, char_name: str, photo: str) -> None:
+    card_id = f"CARD_{int(time.time())}"
+    new_base_card = {
+        "id": card_id,
+        "name": char_name,
+        "tier": tier,
+        "photo": photo
+    }
+
+    cards_pool_db.append(new_base_card)
+    save_cards_pool(cards_pool_db)
+
+    test_card = create_card_instance(user_id, forced_tier=tier)
+    test_card["name"] = char_name
+    test_card["photo"] = photo
+    save_user_cards(user_cards_db)
+
+    tier_emoji = TIER_EMOJIS.get(tier, tier)
+
+    text = (
+        f"✅ <b>NEW CARD ADDED TO GLOBAL POOL!</b> 🎉\n\n"
+        f"⚔️ <b>Character Name:</b> <b>{escape_html(char_name)}</b>\n"
+        f"✨ <b>Tier:</b> {tier_emoji}\n"
+        f"🔑 <b>Sample Roster Code:</b> <code>{test_card['code']}</code>\n\n"
+        f"Total Base Pool Size: <code>{len(cards_pool_db)} cards</code>"
+    )
+
+    if photo and update.message:
+        try:
+            await update.message.reply_photo(photo=photo, caption=text, parse_mode='HTML')
+            return
+        except Exception as e:
+            logger.warning(f"Could not send added card photo: {e}")
+
+    if update.message:
+        await update.message.reply_text(text, parse_mode='HTML')
+
 async def addcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Owner command to add a new character card to base pool."""
+    """Owner command to add a new character card using interactive wizard or direct args."""
     if not update.message or not update.message.from_user:
         return
 
@@ -1417,62 +1456,170 @@ async def addcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     args = context.args or []
-    if len(args) < 2:
-        await update.message.reply_text(
-            "⚠️ Usage: <code>/addcard &lt;Mortal|Awakened|Transcendent|Celestial|Primordial&gt; &lt;Character Name&gt;</code>\n"
-            "<i>(Tip: Send as caption to an image or reply to a photo to attach card image!)</i>",
-            parse_mode='HTML'
-        )
+
+    # If direct arguments supplied (e.g. /addcard Mortal Xiao Yan), process immediately!
+    if len(args) >= 2:
+        raw_tier = args[0].strip().capitalize()
+        valid_tiers = ["Mortal", "Awakened", "Transcendent", "Celestial", "Primordial"]
+
+        matched_tier = None
+        for vt in valid_tiers:
+            if raw_tier.lower() == vt.lower():
+                matched_tier = vt
+                break
+
+        if not matched_tier:
+            await update.message.reply_text(
+                f"⚠️ Invalid Tier <code>{raw_tier}</code>!\nValid tiers: <code>Mortal, Awakened, Transcendent, Celestial, Primordial</code>",
+                parse_mode='HTML'
+            )
+            return
+
+        char_name = " ".join(args[1:]).strip()
+        photo_file_id = ""
+
+        if update.message.photo:
+            photo_file_id = update.message.photo[-1].file_id
+        elif update.message.reply_to_message and update.message.reply_to_message.photo:
+            photo_file_id = update.message.reply_to_message.photo[-1].file_id
+
+        await finalize_add_card(update, user_id, matched_tier, char_name, photo_file_id)
         return
 
-    raw_tier = args[0].strip().capitalize()
-    valid_tiers = ["Mortal", "Awakened", "Transcendent", "Celestial", "Primordial"]
-
-    matched_tier = None
-    for vt in valid_tiers:
-        if raw_tier.lower() == vt.lower():
-            matched_tier = vt
-            break
-
-    if not matched_tier:
-        await update.message.reply_text(
-            f"⚠️ Invalid Tier <code>{raw_tier}</code>!\nValid tiers: <code>Mortal, Awakened, Transcendent, Celestial, Primordial</code>",
-            parse_mode='HTML'
-        )
-        return
-
-    char_name = " ".join(args[1:]).strip()
-    photo_file_id = ""
-
-    if update.message.photo:
-        photo_file_id = update.message.photo[-1].file_id
-    elif update.message.reply_to_message and update.message.reply_to_message.photo:
-        photo_file_id = update.message.reply_to_message.photo[-1].file_id
-
-    card_id = f"CARD_{int(time.time())}"
-    new_base_card = {
-        "id": card_id,
-        "name": char_name,
-        "tier": matched_tier,
-        "photo": photo_file_id
+    # NO ARGUMENTS: Start Interactive Step-by-Step Wizard!
+    owner_addcard_sessions[user_id] = {
+        "step": "awaiting_photo",
+        "photo": "",
+        "tier": ""
     }
 
-    cards_pool_db.append(new_base_card)
-    save_cards_pool(cards_pool_db)
-
-    test_card = create_card_instance(user_id, forced_tier=matched_tier)
-    test_card["name"] = char_name
-    test_card["photo"] = photo_file_id
-    save_user_cards(user_cards_db)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⏩ Skip Photo (No Image)", callback_data="addcard_skipphoto")],
+        [InlineKeyboardButton("❌ Cancel Wizard", callback_data="addcard_cancel")]
+    ])
 
     await update.message.reply_text(
-        f"✅ <b>NEW CARD ADDED TO GLOBAL POOL!</b>\n\n"
-        f"⚔️ <b>Character:</b> <b>{escape_html(char_name)}</b>\n"
-        f"✨ <b>Tier:</b> {TIER_EMOJIS.get(matched_tier, matched_tier)}\n"
-        f"🔑 <b>Sample Roster Code:</b> <code>{test_card['code']}</code>\n\n"
-        f"Total Pool Size: <code>{len(cards_pool_db)} cards</code>",
+        "✨ <b>CARD CREATION WIZARD (Step 1/3)</b>\n\n"
+        "📷 <b>1st: Please Send/Upload the Card Photo/Image</b> now.\n"
+        "<i>Or tap 'Skip Photo' below to create a text-only card.</i>",
+        reply_markup=keyboard,
         parse_mode='HTML'
     )
+
+async def addcard_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.from_user:
+        return
+
+    user_id = query.from_user.id
+    if not is_owner(user_id):
+        await query.answer("🚫 Only the bot owner can use this feature!", show_alert=True)
+        return
+
+    data = query.data or ""
+    await query.answer()
+
+    if data == "addcard_cancel":
+        owner_addcard_sessions.pop(user_id, None)
+        await query.edit_message_text("❌ <b>Card Creation Wizard Canceled!</b>", parse_mode='HTML')
+        return
+
+    session = owner_addcard_sessions.get(user_id)
+    if not session:
+        await query.edit_message_text("⚠️ <b>Session expired or not found. Type <code>/addcard</code> to start again!</b>", parse_mode='HTML')
+        return
+
+    # Handle Skip Photo button
+    if data == "addcard_skipphoto":
+        session["photo"] = ""
+        session["step"] = "awaiting_tier"
+
+        tier_buttons = [
+            [
+                InlineKeyboardButton("⚪ Mortal", callback_data="addcard_tier_Mortal"),
+                InlineKeyboardButton("🟢 Awakened", callback_data="addcard_tier_Awakened")
+            ],
+            [
+                InlineKeyboardButton("🔵 Transcendent", callback_data="addcard_tier_Transcendent"),
+                InlineKeyboardButton("🟣 Celestial", callback_data="addcard_tier_Celestial")
+            ],
+            [
+                InlineKeyboardButton("🔥 Primordial", callback_data="addcard_tier_Primordial")
+            ],
+            [
+                InlineKeyboardButton("❌ Cancel Wizard", callback_data="addcard_cancel")
+            ]
+        ]
+        keyboard = InlineKeyboardMarkup(tier_buttons)
+
+        await query.edit_message_text(
+            "✨ <b>CARD CREATION WIZARD (Step 2/3)</b>\n\n"
+            "📷 <b>Photo:</b> Skipped\n\n"
+            "🏷️ <b>2nd: Select Card Tier below:</b>",
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+        return
+
+    # Handle Tier Selection buttons
+    if data.startswith("addcard_tier_"):
+        selected_tier = data.replace("addcard_tier_", "")
+        session["tier"] = selected_tier
+        session["step"] = "awaiting_name"
+
+        symbol = TIER_SYMBOLS.get(selected_tier, "⚪️")
+
+        await query.edit_message_text(
+            f"✨ <b>CARD CREATION WIZARD (Step 3/3)</b>\n\n"
+            f"📷 <b>Photo:</b> {'Attached ✅' if session['photo'] else 'None'}\n"
+            f"🏷️ <b>Selected Tier:</b> {symbol} {selected_tier}\n\n"
+            f"✏️ <b>3rd: Now type and send the Character Name in chat:</b>\n"
+            f"<i>(e.g. Xiao Yan, Tanjiro, Gojo Satoru)</i>",
+            parse_mode='HTML'
+        )
+        return
+
+async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.from_user or not update.message.photo:
+        return
+
+    user = update.message.from_user
+    user_id = user.id
+    track_user_data(user)
+
+    if is_owner(user_id) and user_id in owner_addcard_sessions:
+        session = owner_addcard_sessions[user_id]
+        if session.get("step") == "awaiting_photo":
+            photo_file_id = update.message.photo[-1].file_id
+            session["photo"] = photo_file_id
+            session["step"] = "awaiting_tier"
+
+            tier_buttons = [
+                [
+                    InlineKeyboardButton("⚪ Mortal", callback_data="addcard_tier_Mortal"),
+                    InlineKeyboardButton("🟢 Awakened", callback_data="addcard_tier_Awakened")
+                ],
+                [
+                    InlineKeyboardButton("🔵 Transcendent", callback_data="addcard_tier_Transcendent"),
+                    InlineKeyboardButton("🟣 Celestial", callback_data="addcard_tier_Celestial")
+                ],
+                [
+                    InlineKeyboardButton("🔥 Primordial", callback_data="addcard_tier_Primordial")
+                ],
+                [
+                    InlineKeyboardButton("❌ Cancel Wizard", callback_data="addcard_cancel")
+                ]
+            ]
+            keyboard = InlineKeyboardMarkup(tier_buttons)
+
+            await update.message.reply_text(
+                "✨ <b>CARD CREATION WIZARD (Step 2/3)</b>\n\n"
+                "📷 <b>Photo:</b> Photo Attached ✅\n\n"
+                "🏷️ <b>2nd: Select Card Tier below:</b>",
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
+            return
 
 async def offer_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Offers card for sale to another user in exchange for Spirit Stones."""
@@ -2125,14 +2272,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not user_text:
         return
 
-    # Ignore command messages starting with '/'
-    if user_text.startswith('/'):
-        return
-
     # Collect user data from sender
     user = message.from_user
     if user:
         track_user_data(user)
+
+    # Check if owner is in wizard step 'awaiting_name' for /addcard
+    if user and is_owner(user.id) and user.id in owner_addcard_sessions:
+        session = owner_addcard_sessions[user.id]
+        if session.get("step") == "awaiting_name":
+            char_name = user_text.strip()
+            tier = session.get("tier", "Mortal")
+            photo = session.get("photo", "")
+            owner_addcard_sessions.pop(user.id, None)
+
+            await finalize_add_card(update, user.id, tier, char_name, photo)
+            return
+
+    # Ignore command messages starting with '/'
+    if user_text.startswith('/'):
+        return
 
     # Collect user data from replied-to user if present
     if message.reply_to_message and message.reply_to_message.from_user:
@@ -2468,6 +2627,12 @@ def main():
     app.add_handler(CommandHandler("claim", claim_command))
     app.add_handler(CommandHandler("recruit", claim_command))
     app.add_handler(CommandHandler("grab", claim_command))
+
+    # Callback Queries Handler (For /addcard Wizard Inline Buttons)
+    app.add_handler(CallbackQueryHandler(addcard_callback_handler, pattern="^addcard_"))
+
+    # Photo Messages Handler (For /addcard Wizard Photo Upload)
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
 
     # Member Join Event Handler
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members_handler))
