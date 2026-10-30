@@ -1384,12 +1384,15 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     query_text = inline_query.query.strip().lower()
+    if not query_text:
+        await inline_query.answer([], cache_time=5)
+        return
 
     results = []
     matched_pool = []
     for card in cards_pool_db:
         c_name = card.get("name", "").lower()
-        if not query_text or query_text in c_name:
+        if query_text in c_name:
             matched_pool.append(card)
 
     for card in matched_pool[:20]:
@@ -3331,6 +3334,41 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         parse_mode='HTML'
     )
 
+BOT_COMMANDS_KNOWLEDGE = """
+[Bot Features & Commands Reference Manual for Sylvi]:
+1. Cultivation Anime Card System:
+   • /summon - Group chat mein random recruit drop summon karne ke liye (60 min user cooldown, 1 min group cooldown).
+   • /claim, /recruit, /grab - Drop hui card ko apne crew mein claim karne ke liye.
+   • /mycards, /roster - Apne owned cards, pagination, tier filters (<24h expiring filter) ke sath dekhne ke liye.
+   • /showcard <code> - Specific card ki details (Name, Tier, Worth, Stay Time - no code shown) dekhne ke liye.
+   • /discard <code> - Card discard karke uski worth ke barabar Spirit Stones (SS) pane ke liye.
+   • /removecard <pool_id_or_name> (Owner) / <4-digit_code> (User) - Global pool ya roster se card delete/remove karne ke liye.
+   • /allcards - Global card pool mein available saari cards dekhne ke liye.
+   • /daily - Roz ke 500 Spirit Stones (SS) + 1 free Mortal card claim karne ke liye.
+   • /pillshop - Card ka stay time badhane ke liye pills kharidne ka shop.
+   • /buy <pill> [qty] - Pills buy karne ke liye (e.g. /buy qi 2, /buy eternal).
+   • /inventory - Apne Spirit Stones (SS) balance aur pills stock check karne ke liye.
+   • /cultivate <code> <pill> - Card ko pill khilane ke liye taaki uska stay time extend ho ya permanent ho jaye.
+   • /offer <code> <price_ss> - Apne card ko doosre user ko Spirit Stones ke badle sell/offer par lagane ke liye. (SELLING COMMAND!)
+   • /buyoffer <offer_id> - Offer ki gayi card ko buy karne ke liye.
+   • /swap <my_code> <their_code> - Same tier ki cards ko aapas mein swap karne ke liye.
+   • /myprofile, /profile - Apna game completion %, unique cards collected, aur tier progress profile dekhne ke liye.
+   • /app - Telegram Mini App open karne ke liye interactive web app button.
+   • /mine <bet_ss> <mines_count> - Spirit Stones bet karke Mines betting game khelne ke liye (min bet 50 SS).
+2. General & Game Commands:
+   • /status - Bot ka system health, uptime, database status, aur active game stats dekhne ke liye.
+   • /help, /start - Help menu dekhne ke liye.
+   • /4words - 4-letter word guessing game khelne ke liye.
+   • /statsgc - Group chat message stats aur memory info ke liye.
+3. Owner Commands:
+   • /addcard <tier> <name> - Global pool mein nayi card add karne ke liye (photo ke sath).
+   • /addapi <key> - Nayi Groq AI API key dynamically add karne ke liye.
+   • /listapi - Active Groq AI keys ka status dekhne ke liye.
+   • /allusers - Tracked users database summary ke liye.
+   • /mongoexport & /mongoimport - MongoDB backup export/import ke liye.
+   • /removecard <pool_id_or_name> - Global database pool se card permanently delete karne ke liye.
+"""
+
 # ==================== MAIN MESSAGE HANDLER ====================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.text:
@@ -3474,7 +3512,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 "content": (
                     f"Aapka naam Sylvi hai. Aap ek friendly, smart aur helpful human-like Hinglish AI assistant ho.{owner_context} "
                     "Aap Telegram user ke saath private DM mein baat kar rahe ho. "
-                    "Friendly, polite, natural human tone aur helpful manner mein clear Hinglish/English mein reply do."
+                    "Friendly, polite, natural human tone aur helpful manner mein clear Hinglish/English mein reply do.\n\n"
+                    f"{BOT_COMMANDS_KNOWLEDGE}"
                 )
             },
             {"role": "user", "content": f"{sender_name}: {user_text}"}
@@ -3587,6 +3626,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "   - Direct reply karte waqt user ko bewaja tag MAT karo.\n"
             "3. REMINDERS / WAITING TARGET MESSAGES:\n"
             "   - Agar koi user kahe ki kisi target user ke message karte hi usse ye bolna (e.g., 'Koji jese hi message kare usse bolo chup hoja' ya 'Rahul jab message kare usko bolna meeting 5 baje hai'), toh aap polite aur clear way mein confirm kar do: 'Sure! Us member ke group mein message karte hi main unhe ye message deliver kar dunga. 👍'\n\n"
+            f"{BOT_COMMANDS_KNOWLEDGE}\n\n"
             f"[Tracked Group Users Database]:\n{tracked_users_context}"
         )
 
@@ -3623,9 +3663,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Send reply directly
         await message.reply_text(reply_text, reply_to_message_id=message.message_id)
 
+web_active_mines: Dict[int, Dict] = {}  # user_id -> game_state for web mini app
+
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path in ["/", "/app", "/webapp"]:
+        parsed_path = urllib.parse.urlparse(self.path)
+        path = parsed_path.path
+        query_params = urllib.parse.parse_qs(parsed_path.query)
+
+        if path in ["/", "/app", "/webapp"]:
             html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mini_app.html")
             if os.path.exists(html_path):
                 try:
@@ -3639,10 +3685,202 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 except Exception as e:
                     logger.error(f"Error serving mini_app.html: {e}")
 
+        elif path == "/api/user":
+            user_id_str = query_params.get("user_id", ["5193216992"])[0]
+            try:
+                user_id = int(user_id_str)
+            except ValueError:
+                user_id = 5193216992
+
+            eco = get_user_economy(user_id)
+            user_cards = [c for c in user_cards_db.values() if c.get("owner_id") == user_id]
+
+            total_pool_count = len(cards_pool_db)
+            owned_card_names = {c.get("name", "").strip().lower() for c in user_cards}
+            unique_owned_count = sum(1 for b in cards_pool_db if b.get("name", "").strip().lower() in owned_card_names) if total_pool_count > 0 else len(owned_card_names)
+            completion_pct = round((unique_owned_count / total_pool_count * 100.0) if total_pool_count > 0 else 0.0, 1)
+
+            cards_list = []
+            for c in user_cards:
+                cards_list.append({
+                    "code": c.get("code"),
+                    "name": c.get("name"),
+                    "tier": c.get("tier"),
+                    "worth": get_card_worth(c),
+                    "stay_time": format_time_left(c)
+                })
+
+            data = {
+                "spirit_stones": eco["spirit_stones"],
+                "pills": eco.get("pills", {}),
+                "pill_catalog": PILL_CATALOG,
+                "roster_count": len(user_cards),
+                "unique_collected": unique_owned_count,
+                "total_pool": total_pool_count,
+                "completion_pct": completion_pct,
+                "user_cards": cards_list
+            }
+
+            self.send_response(200)
+            self.send_header("Content-type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(data).encode("utf-8"))
+            return
+
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
         self.wfile.write(b"OK - Sylvi Groq AI Bot is running")
+
+    def do_POST(self):
+        parsed_path = urllib.parse.urlparse(self.path)
+        path = parsed_path.path
+
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length)
+        try:
+            req = json.loads(post_data.decode('utf-8'))
+        except Exception:
+            req = {}
+
+        if path == "/api/buy":
+            user_id = int(req.get("user_id", 0))
+            pill_num = str(req.get("pill_num", ""))
+            item = PILL_CATALOG.get(pill_num)
+
+            if not item or not user_id:
+                response = {"success": False, "message": "Invalid request"}
+            else:
+                eco = get_user_economy(user_id)
+                price = item["price"]
+                pill_name = item["name"]
+
+                if eco["spirit_stones"] < price:
+                    response = {"success": False, "message": f"Insufficient Spirit Stones! Required: {price} SS"}
+                else:
+                    eco["spirit_stones"] -= price
+                    eco["pills"][pill_name] = eco["pills"].get(pill_name, 0) + 1
+                    save_user_economy(user_economy_db)
+
+                    user_cards = [c for c in user_cards_db.values() if c.get("owner_id") == user_id]
+                    total_pool_count = len(cards_pool_db)
+                    owned_card_names = {c.get("name", "").strip().lower() for c in user_cards}
+                    unique_owned_count = sum(1 for b in cards_pool_db if b.get("name", "").strip().lower() in owned_card_names) if total_pool_count > 0 else len(owned_card_names)
+                    completion_pct = round((unique_owned_count / total_pool_count * 100.0) if total_pool_count > 0 else 0.0, 1)
+
+                    cards_list = [{"code": c.get("code"), "name": c.get("name"), "tier": c.get("tier"), "worth": get_card_worth(c), "stay_time": format_time_left(c)} for c in user_cards]
+
+                    app_data = {
+                        "spirit_stones": eco["spirit_stones"],
+                        "pills": eco.get("pills", {}),
+                        "pill_catalog": PILL_CATALOG,
+                        "roster_count": len(user_cards),
+                        "unique_collected": unique_owned_count,
+                        "total_pool": total_pool_count,
+                        "completion_pct": completion_pct,
+                        "user_cards": cards_list
+                    }
+                    response = {"success": True, "pill_name": pill_name, "app_data": app_data}
+
+            self.send_response(200)
+            self.send_header("Content-type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(response).encode("utf-8"))
+            return
+
+        elif path == "/api/mine/start":
+            user_id = int(req.get("user_id", 0))
+            bet = int(req.get("bet", 50))
+            mines_count = int(req.get("mines_count", 3))
+
+            eco = get_user_economy(user_id)
+            if bet < 50 or eco["spirit_stones"] < bet or mines_count < 1 or mines_count > 24:
+                response = {"success": False, "message": "Invalid bet or insufficient Spirit Stones!"}
+            else:
+                eco["spirit_stones"] -= bet
+                save_user_economy(user_economy_db)
+
+                mine_positions = random.sample(range(25), mines_count)
+                game_state = {
+                    "bet": bet,
+                    "mines_count": mines_count,
+                    "mine_positions": mine_positions,
+                    "revealed": [],
+                    "tiles_opened": 0,
+                    "multiplier": 1.00,
+                    "potential": bet,
+                    "game_over": False,
+                    "won": False,
+                    "winnings": 0
+                }
+                web_active_mines[user_id] = game_state
+                response = {"success": True, "game": game_state}
+
+            self.send_response(200)
+            self.send_header("Content-type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(response).encode("utf-8"))
+            return
+
+        elif path == "/api/mine/click":
+            user_id = int(req.get("user_id", 0))
+            tile_idx = int(req.get("tile_idx", 0))
+            game = web_active_mines.get(user_id)
+
+            if not game or game["game_over"]:
+                response = {"success": False, "message": "No active game"}
+            else:
+                if tile_idx in game["mine_positions"]:
+                    game["game_over"] = True
+                    game["won"] = False
+                    game["winnings"] = 0
+                else:
+                    if tile_idx not in game["revealed"]:
+                        game["revealed"].append(tile_idx)
+                        game["tiles_opened"] += 1
+                        game["multiplier"] = calculate_mines_multiplier(25, game["mines_count"], game["tiles_opened"])
+                        game["potential"] = int(game["bet"] * game["multiplier"])
+
+                        safe_total = 25 - game["mines_count"]
+                        if game["tiles_opened"] == safe_total:
+                            game["game_over"] = True
+                            game["won"] = True
+                            game["winnings"] = game["potential"]
+                            eco = get_user_economy(user_id)
+                            eco["spirit_stones"] += game["winnings"]
+                            save_user_economy(user_economy_db)
+
+                response = {"success": True, "game": game}
+
+            self.send_response(200)
+            self.send_header("Content-type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(response).encode("utf-8"))
+            return
+
+        elif path == "/api/mine/cashout":
+            user_id = int(req.get("user_id", 0))
+            game = web_active_mines.get(user_id)
+
+            if not game or game["game_over"] or game["tiles_opened"] <= 0:
+                response = {"success": False, "message": "Cannot cash out"}
+            else:
+                game["game_over"] = True
+                game["won"] = True
+                game["winnings"] = game["potential"]
+                eco = get_user_economy(user_id)
+                eco["spirit_stones"] += game["winnings"]
+                save_user_economy(user_economy_db)
+                response = {"success": True, "game": game, "winnings": game["winnings"]}
+
+            self.send_response(200)
+            self.send_header("Content-type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(response).encode("utf-8"))
+            return
+
+        self.send_response(404)
+        self.end_headers()
 
     def log_message(self, format, *args):
         pass  # Suppress HTTP access logs to keep console logs clean
