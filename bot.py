@@ -1518,11 +1518,11 @@ async def search_card_callback_handler(update: Update, context: ContextTypes.DEF
             unique_matches = sorted(list(matched_names))
             if 0 <= idx < len(unique_matches):
                 selected_name = unique_matches[idx]
+                await send_card_search_result(query.message, selected_name)
                 try:
                     await query.message.delete()
                 except Exception:
                     pass
-                await send_card_search_result(query.message, selected_name)
 
 async def daily_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Claims daily free 500 Spirit Stones (SS) + 1 Mortal Card."""
