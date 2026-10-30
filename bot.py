@@ -213,25 +213,14 @@ USER_ECONOMY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "us
 DEFAULT_CARDS_POOL = [
     # Mortal
     {"id": "M001", "name": "Xiao Yan (Novice Disciple)", "tier": "Mortal", "photo": ""},
-    {"id": "M002", "name": "Lin Fan (Outer Disciple)", "tier": "Mortal", "photo": ""},
-    {"id": "M003", "name": "Li Qiye (Novice Weaver)", "tier": "Mortal", "photo": ""},
-    {"id": "M004", "name": "Tang San (Spirit Scholar)", "tier": "Mortal", "photo": ""},
     # Awakened
     {"id": "A001", "name": "Xiao Yan (Flame Master)", "tier": "Awakened", "photo": ""},
-    {"id": "A002", "name": "Tang San (Blue Silver Grass)", "tier": "Awakened", "photo": ""},
-    {"id": "A003", "name": "Ye Chen (Immortal Sword)", "tier": "Awakened", "photo": ""},
     # Transcendent
     {"id": "T001", "name": "Lin Feng (Sword Sovereign)", "tier": "Transcendent", "photo": ""},
-    {"id": "T002", "name": "Han Li (Ascendant)", "tier": "Transcendent", "photo": ""},
-    {"id": "T003", "name": "Shi Hao (Grand Emperor)", "tier": "Transcendent", "photo": ""},
     # Celestial
     {"id": "C001", "name": "Sung Jin-Woo (Shadow Monarch)", "tier": "Celestial", "photo": ""},
-    {"id": "C002", "name": "Anlan (Ancient Celestial)", "tier": "Celestial", "photo": ""},
-    {"id": "C003", "name": "Lu Sheng (Dao Master)", "tier": "Celestial", "photo": ""},
     # Primordial
     {"id": "P001", "name": "Hongjun (Ancestor of Dao)", "tier": "Primordial", "photo": ""},
-    {"id": "P002", "name": "Pangu (Creator God)", "tier": "Primordial", "photo": ""},
-    {"id": "P003", "name": "Chaos Origin Sovereign", "tier": "Primordial", "photo": ""}
 ]
 
 def load_cards_pool() -> List[Dict]:
@@ -359,11 +348,35 @@ active_card_swaps: Dict[str, Dict] = {}   # swap_id -> {"from_user_id", "to_user
 group_message_counts: Dict[int, int] = {} # chat_id -> msg_count for 100-msg drop trigger
 active_drops: Dict[int, Dict] = {}        # chat_id -> dropped card info
 
+user_summon_cooldowns: Dict[int, float] = {}  # user_id -> last_summon_timestamp
+chat_summon_cooldowns: Dict[int, float] = {}  # chat_id -> last_summon_timestamp
+
+TIER_WORTH = {
+    "Mortal": 200,
+    "Awakened": 500,
+    "Transcendent": 1200,
+    "Celestial": 3000,
+    "Primordial": 10000
+}
+
+TIER_SYMBOLS = {
+    "Mortal": "⚪️",
+    "Awakened": "🟢",
+    "Transcendent": "🔵",
+    "Celestial": "🟣",
+    "Primordial": "🔥"
+}
+
+def get_card_worth(card: Dict) -> int:
+    if "worth" in card and card["worth"]:
+        return card["worth"]
+    tier = card.get("tier", "Mortal").capitalize()
+    return TIER_WORTH.get(tier, 200)
+
 def generate_unique_card_code() -> str:
-    """Generates a unique 4-character alphanumeric code for a claimed card."""
-    chars = string.ascii_uppercase + string.digits
+    """Generates a unique 4-digit numeric code ('0000'-'9999') for a claimed card."""
     while True:
-        code = ''.join(random.choices(chars, k=4))
+        code = ''.join(random.choices(string.digits, k=4))
         if code not in user_cards_db:
             return code
 
@@ -391,7 +404,7 @@ def clean_expired_cards():
 
 def format_time_left(card: Dict) -> str:
     if card.get("is_permanent", False):
-        return "Permanent ♾️"
+        return "Eternal Life / Immortal Body ♾️"
     expire_at = card.get("expire_at", 0)
     now = time.time()
     diff = expire_at - now
@@ -401,11 +414,11 @@ def format_time_left(card: Dict) -> str:
     hours = int((diff % 86400) // 3600)
     mins = int((diff % 3600) // 60)
     if days > 0:
-        return f"{days}d {hours}h remaining"
+        return f"{days} Day{'s' if days > 1 else ''} remaining"
     elif hours > 0:
-        return f"{hours}h {mins}m remaining"
+        return f"{hours} Hour{'s' if hours > 1 else ''} remaining"
     else:
-        return f"{mins}m remaining"
+        return f"{mins} Min{'s' if mins > 1 else ''} remaining"
 
 def get_user_economy(user_id: int) -> Dict:
     uid_str = str(user_id)
@@ -475,11 +488,13 @@ def create_card_instance(owner_id: int, forced_tier: Optional[str] = None) -> Di
 
     code = generate_unique_card_code()
     now = time.time()
+    worth = TIER_WORTH.get(tier, 200)
     card_data = {
         "code": code,
         "owner_id": owner_id,
         "name": base_card.get("name", "Unknown Cultivator"),
         "tier": tier,
+        "worth": worth,
         "photo": base_card.get("photo", ""),
         "obtained_at": now,
         "expire_at": now + (72 * 3600),  # 72 hours default stay limit
@@ -994,7 +1009,7 @@ async def welcome_new_members_handler(update: Update, context: ContextTypes.DEFA
 # ==================== CULTIVATION CARD COMMANDS ====================
 
 async def summon_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Summons a random card with tier probabilities."""
+    """Summons a random card drop in group chat with tier probabilities."""
     if not update.message or not update.message.from_user:
         return
 
@@ -1002,31 +1017,77 @@ async def summon_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     track_user_data(user)
     clean_expired_cards()
 
-    card = create_card_instance(user.id)
-    tier_str = TIER_EMOJIS.get(card["tier"], card["tier"])
-    uname = escape_html(user.first_name)
-    c_name = escape_html(card["name"])
-    code = card["code"]
-    time_left = format_time_left(card)
+    # RESTRICTION: Group chat only
+    if update.message.chat.type not in ['group', 'supergroup']:
+        await update.message.reply_text("⚠️ <code>/summon</code> command only works in group chats!", parse_mode='HTML')
+        return
+
+    now = time.time()
+    user_id = user.id
+    chat_id = update.message.chat.id
+
+    # 1. Check per-user 60-min cooldown (3600 seconds)
+    last_user_summon = user_summon_cooldowns.get(user_id, 0.0)
+    user_diff = now - last_user_summon
+    if user_diff < 3600:
+        rem_sec = int(3600 - user_diff)
+        rem_mins = rem_sec // 60
+        rem_secs_left = rem_sec % 60
+        await update.message.reply_text(
+            f"⏳ <b>Summon Cooldown Active!</b>\n\nYou must wait <code>{rem_mins}m {rem_secs_left}s</code> before you can summon again.",
+            parse_mode='HTML'
+        )
+        return
+
+    # 2. Check group global 1-min cooldown (60 seconds)
+    last_chat_summon = chat_summon_cooldowns.get(chat_id, 0.0)
+    chat_diff = now - last_chat_summon
+    if chat_diff < 60:
+        rem_sec = int(60 - chat_diff)
+        await update.message.reply_text(
+            f"⏳ <b>Group Summon Cooldown Active!</b>\n\nA card was recently summoned in this group. Please wait <code>{rem_sec}s</code>.",
+            parse_mode='HTML'
+        )
+        return
+
+    # Set cooldowns
+    user_summon_cooldowns[user_id] = now
+    chat_summon_cooldowns[chat_id] = now
+
+    dropped_tier = roll_card_tier()
+    matching_pool = [c for c in cards_pool_db if c.get("tier", "").lower() == dropped_tier.lower()]
+
+    if matching_pool:
+        base_card = random.choice(matching_pool)
+        c_name = base_card.get("name", f"{dropped_tier} Cultivator")
+        c_photo = base_card.get("photo", "")
+    else:
+        c_name = f"{dropped_tier} Cultivator"
+        c_photo = ""
+
+    active_drops[chat_id] = {
+        "name": c_name,
+        "tier": dropped_tier,
+        "photo": c_photo,
+        "worth": TIER_WORTH.get(dropped_tier, 200)
+    }
+
+    symbol = TIER_SYMBOLS.get(dropped_tier, "⚪️")
+    c_name_esc = escape_html(c_name)
 
     text = (
-        f"🌌 <b>CULTIVATION CARD SUMMONED!</b>\n\n"
-        f"👤 <b>Summoner:</b> {uname}\n"
-        f"⚔️ <b>Character:</b> <b>{c_name}</b>\n"
-        f"✨ <b>Tier:</b> {tier_str}\n"
-        f"🔑 <b>Card Code:</b> <code>{code}</code>\n"
-        f"⏳ <b>Roster Stay Limit:</b> <code>{time_left}</code>\n\n"
-        f"💡 <i>Type <code>/showcard {code}</code> to view details or <code>/cultivate {code} &lt;pill&gt;</code> to extend stay time!</i>"
+        f"A {dropped_tier} {symbol} recruit {c_name_esc} has appeared...\n\n"
+        f"Use /recruit to bring them into your crew"
     )
 
-    if card.get("photo"):
+    if c_photo:
         try:
-            await update.message.reply_photo(photo=card["photo"], caption=text, parse_mode='HTML')
+            await update.message.reply_photo(photo=c_photo, caption=text)
             return
         except Exception as e:
             logger.warning(f"Could not send card photo: {e}")
 
-    await update.message.reply_text(text, parse_mode='HTML')
+    await update.message.reply_text(text)
 
 async def mycards_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Lists user's active cards and remaining stay limits."""
@@ -1043,7 +1104,7 @@ async def mycards_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not user_cards:
         await update.message.reply_text(
             f"📜 <b>{uname}'s Roster is Empty!</b>\n\n"
-            f"Type <code>/summon</code> or <code>/daily</code> to recruit your first cultivation card!",
+            f"Type <code>/summon</code> in a group chat or <code>/daily</code> to recruit your first cultivation card!",
             parse_mode='HTML'
         )
         return
@@ -1056,8 +1117,9 @@ async def mycards_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         code = c.get("code")
         c_name = escape_html(c.get("name", "Hero"))
         tier_str = TIER_EMOJIS.get(c.get("tier"), c.get("tier"))
+        worth = get_card_worth(c)
         t_left = format_time_left(c)
-        lines.append(f"• <code>{code}</code> | {tier_str} | <b>{c_name}</b> ({t_left})")
+        lines.append(f"• <code>{code}</code> | {tier_str} | <b>{c_name}</b> ({worth} SS, {t_left})")
 
     cards_str = "\n".join(lines)
     total_count = len(user_cards)
@@ -1077,10 +1139,10 @@ async def showcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     clean_expired_cards()
     args = context.args or []
     if not args:
-        await update.message.reply_text("⚠️ Usage: <code>/showcard &lt;4-digit_code&gt;</code> (e.g. <code>/showcard X82K</code>)", parse_mode='HTML')
+        await update.message.reply_text("⚠️ Usage: <code>/showcard &lt;4-digit_code&gt;</code> (e.g. <code>/showcard 1234</code>)", parse_mode='HTML')
         return
 
-    code = args[0].strip().upper()
+    code = args[0].strip()
     card = user_cards_db.get(code)
 
     if not card:
@@ -1092,17 +1154,19 @@ async def showcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     owner_name = escape_html(owner_info.get("first_name", f"User {owner_id}"))
 
     c_name = escape_html(card.get("name", "Cultivator"))
-    tier_str = TIER_EMOJIS.get(card.get("tier"), card.get("tier"))
-    t_left = format_time_left(card)
+    tier_name = card.get("tier", "Mortal")
+    tier_emoji = TIER_EMOJIS.get(tier_name, tier_name)
+    worth = get_card_worth(card)
+    stay_time = format_time_left(card)
 
     text = (
         f"🎴 <b>CULTIVATION CARD DETAILS</b>\n\n"
+        f"⚔️ <b>Name:</b> <b>{c_name}</b>\n"
+        f"💎 <b>Worth:</b> <code>{worth} SS</code>\n"
+        f"✨ <b>Tier:</b> {tier_emoji}\n"
+        f"⏳ <b>Stay Time in Crew:</b> <code>{stay_time}</code>\n"
         f"🔑 <b>Code:</b> <code>{code}</code>\n"
-        f"⚔️ <b>Character:</b> <b>{c_name}</b>\n"
-        f"✨ <b>Tier:</b> {tier_str}\n"
-        f"👤 <b>Owner:</b> {owner_name}\n"
-        f"⏳ <b>Roster Stay Limit:</b> <code>{t_left}</code>\n\n"
-        f"💡 Feed pills with <code>/cultivate {code} &lt;pill_number_or_name&gt;</code> to extend stay duration!"
+        f"👤 <b>Owner:</b> {owner_name}"
     )
 
     if card.get("photo"):
@@ -1157,6 +1221,14 @@ async def daily_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         parse_mode='HTML'
     )
 
+PILL_KEYWORD_MAP = {
+    "1": "1", "qi": "1", "qigathering": "1",
+    "2": "2", "jade": "2", "jadespirit": "2",
+    "3": "3", "heavenly": "3", "heavenlylife": "3",
+    "4": "4", "emperor": "4", "emperors": "4", "longevity": "4",
+    "5": "5", "eternal": "5", "eternallife": "5"
+}
+
 async def pillshop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Displays Pill Shop catalog."""
     if not update.message or not update.message.from_user:
@@ -1178,9 +1250,10 @@ async def pillshop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         f"💰 <b>Your Spirit Stones Balance:</b> <code>{ss_bal} SS</code>\n\n"
         f"{shop_text}\n\n"
         f"🛒 <b>Commands:</b>\n"
-        f"• Buy pills: <code>/buypill &lt;pill_number_or_name&gt; [qty]</code>\n"
+        f"• Buy pills: <code>/buy &lt;qi|jade|heavenly|emperor|longevity|eternal|num&gt; [qty]</code>\n"
+        f"• Example: <code>/buy qi 2</code> or <code>/buy eternal</code>\n"
         f"• Check stock: <code>/inventory</code>\n"
-        f"• Feed card: <code>/cultivate &lt;card_code&gt; &lt;pill_number_or_name&gt;</code>"
+        f"• Feed card: <code>/cultivate &lt;card_code&gt; &lt;pill&gt;</code>"
     )
 
     await update.message.reply_text(text, parse_mode='HTML')
@@ -1196,22 +1269,26 @@ async def buypill_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     args = context.args or []
     if not args:
-        await update.message.reply_text("⚠️ Usage: <code>/buypill &lt;pill_number_or_name&gt; [qty]</code> (e.g. <code>/buypill 1 2</code>)", parse_mode='HTML')
+        await update.message.reply_text("⚠️ Usage: <code>/buy &lt;pill_name_or_number&gt; [qty]</code> (e.g. <code>/buy qi 2</code>, <code>/buy eternal</code>)", parse_mode='HTML')
         return
 
-    query = args[0].strip().lower()
+    query_key = args[0].strip().lower()
     qty = 1
     if len(args) > 1 and args[1].isdigit():
         qty = max(1, int(args[1]))
 
+    mapped_num = PILL_KEYWORD_MAP.get(query_key)
     target_item = None
-    for num, item in PILL_CATALOG.items():
-        if query == num or query in item["name"].lower():
-            target_item = item
-            break
+    if mapped_num and mapped_num in PILL_CATALOG:
+        target_item = PILL_CATALOG[mapped_num]
+    else:
+        for num, item in PILL_CATALOG.items():
+            if query_key == num or query_key in item["name"].lower():
+                target_item = item
+                break
 
     if not target_item:
-        await update.message.reply_text("❌ Invalid pill selection! Type <code>/pillshop</code> to view available pills.", parse_mode='HTML')
+        await update.message.reply_text("❌ Invalid pill selection! Available keywords: <code>qi, jade, heavenly, emperor, longevity, eternal</code> or numbers <code>1-5</code>.", parse_mode='HTML')
         return
 
     pill_name = target_item["name"]
@@ -1591,7 +1668,7 @@ async def swap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Claims a card dropped via 100-msg group drop."""
+    """Claims a card dropped via /summon or 100-msg group drop."""
     if not update.message or not update.message.from_user:
         return
 
@@ -1601,7 +1678,7 @@ async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     dropped = active_drops.get(chat_id)
     if not dropped:
-        await update.message.reply_text("ℹ️ No active card drop in this chat right now!", parse_mode='HTML')
+        await update.message.reply_text("ℹ️ No active recruit drop in this chat right now!", parse_mode='HTML')
         return
 
     active_drops.pop(chat_id, None)
@@ -1609,21 +1686,112 @@ async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     claimed_card = create_card_instance(user.id, forced_tier=dropped["tier"])
     claimed_card["name"] = dropped["name"]
     claimed_card["photo"] = dropped["photo"]
+    claimed_card["worth"] = dropped.get("worth", TIER_WORTH.get(dropped["tier"], 200))
     save_user_cards(user_cards_db)
 
     uname = escape_html(user.first_name)
     cname = escape_html(claimed_card["name"])
     tier_str = TIER_EMOJIS.get(claimed_card["tier"], claimed_card["tier"])
+    worth = get_card_worth(claimed_card)
     code = claimed_card["code"]
 
     await update.message.reply_text(
-        f"🎉 <b>CARD RECRUITED BY {uname}!</b> 🏆\n\n"
+        f"🎉 <b>{uname} recruited {cname} into their crew!</b> 🏆\n\n"
         f"⚔️ <b>Character:</b> <b>{cname}</b>\n"
         f"✨ <b>Tier:</b> {tier_str}\n"
+        f"💎 <b>Worth:</b> <code>{worth} SS</code>\n"
         f"🔑 <b>Roster Code:</b> <code>{code}</code>\n\n"
-        f"💡 Check your cards anytime with <code>/mycards</code>!",
+        f"💡 Check your crew anytime with <code>/mycards</code>!",
         parse_mode='HTML'
     )
+
+async def removecard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Removes a card from user's roster by code."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    clean_expired_cards()
+
+    args = context.args or []
+    if not args:
+        await update.message.reply_text("⚠️ Usage: <code>/removecard &lt;4-digit_code&gt;</code> (e.g. <code>/removecard 1234</code>)", parse_mode='HTML')
+        return
+
+    code = args[0].strip()
+    card = user_cards_db.get(code)
+
+    if not card:
+        await update.message.reply_text(f"❌ Card code <code>{code}</code> not found in your roster!", parse_mode='HTML')
+        return
+
+    if card.get("owner_id") != user.id and not is_owner(user.id):
+        await update.message.reply_text("🚫 You do not own this card!", parse_mode='HTML')
+        return
+
+    c_name = escape_html(card.get("name", "Card"))
+    user_cards_db.pop(code, None)
+
+    db = get_mongo_db()
+    if db is not None:
+        try:
+            db["user_cards"].delete_one({"_id": code})
+        except Exception as e:
+            logger.error(f"Error removing card {code} from MongoDB: {e}")
+
+    save_user_cards(user_cards_db)
+
+    await update.message.reply_text(
+        f"🗑️ <b>CARD REMOVED!</b>\n\n"
+        f"Card <b>{c_name}</b> (Code: <code>{code}</code>) has been removed from the crew/roster.",
+        parse_mode='HTML'
+    )
+
+async def allcards_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays all character cards in the global base pool."""
+    if not update.message:
+        return
+
+    if not cards_pool_db:
+        await update.message.reply_text("📜 Global card pool is empty!", parse_mode='HTML')
+        return
+
+    tiered_cards: Dict[str, List[Dict]] = {
+        "Primordial": [],
+        "Celestial": [],
+        "Transcendent": [],
+        "Awakened": [],
+        "Mortal": []
+    }
+
+    for c in cards_pool_db:
+        t = c.get("tier", "Mortal").capitalize()
+        if t in tiered_cards:
+            tiered_cards[t].append(c)
+        else:
+            tiered_cards.setdefault("Mortal", []).append(c)
+
+    sections = []
+    for tier_name in ["Primordial", "Celestial", "Transcendent", "Awakened", "Mortal"]:
+        c_list = tiered_cards[tier_name]
+        if not c_list:
+            continue
+        emoji = TIER_EMOJIS.get(tier_name, tier_name)
+        lines = [f"<b>{emoji} ({len(c_list)}):</b>"]
+        for card in c_list:
+            c_id = card.get("id", "N/A")
+            name = escape_html(card.get("name", "Unknown"))
+            lines.append(f"  • [{c_id}] <b>{name}</b>")
+        sections.append("\n".join(lines))
+
+    full_text = "📜 <b>GLOBAL CULTIVATION CARDS POOL:</b>\n\n" + "\n\n".join(sections)
+
+    if len(full_text) > 4000:
+        for chunk in [full_text[i:i+3500] for i in range(0, len(full_text), 3500)]:
+            await update.message.reply_text(chunk, parse_mode='HTML')
+    else:
+        await update.message.reply_text(full_text, parse_mode='HTML')
 
 # ==================== COMMAND HANDLERS ====================
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1638,18 +1806,20 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     help_text = (
         "🤖 <b>Sylvi AI &amp; Cultivation Card Bot - Help Menu</b>\n\n"
         "🌌 <b>Cultivation Anime Card System:</b>\n"
-        "• <code>/summon</code> - Recruit a card (Mortal, Awakened, Transcendent, Celestial, Primordial).\n"
-        "• <code>/mycards</code> / <code>/roster</code> - View your owned cards and remaining stay limits.\n"
-        "• <code>/showcard &lt;code&gt;</code> - View card details and photo using its 4-digit code.\n"
+        "• <code>/summon</code> - Summon a recruit drop (Group Chat only, 60m user CD, 1m GC CD).\n"
+        "• <code>/recruit</code> / <code>/claim</code> / <code>/grab</code> - Bring dropped card into your crew.\n"
+        "• <code>/mycards</code> / <code>/roster</code> - View your owned cards and stay limits.\n"
+        "• <code>/showcard &lt;code&gt;</code> - View card details (Name, Worth, Tier, Stay Time).\n"
+        "• <code>/removecard &lt;code&gt;</code> - Remove/release a card from your crew.\n"
+        "• <code>/allcards</code> - View all cards available in the global card pool.\n"
         "• <code>/daily</code> - Claim daily 500 Spirit Stones (SS) + 1 Bonus Mortal Card.\n"
         "• <code>/pillshop</code> - View pills shop to extend stay duration.\n"
-        "• <code>/buypill &lt;pill&gt; [qty]</code> - Buy cultivation pills with Spirit Stones.\n"
+        "• <code>/buy &lt;pill&gt; [qty]</code> - Buy pills (e.g. <code>/buy qi 2</code>, <code>/buy eternal</code>).\n"
         "• <code>/inventory</code> - Check your Spirit Stones balance and pills stock.\n"
-        "• <code>/cultivate &lt;code&gt; &lt;pill&gt;</code> - Feed pills to cards to extend stay duration.\n"
+        "• <code>/cultivate &lt;code&gt; &lt;pill&gt;</code> - Feed pills to extend card stay duration.\n"
         "• <code>/offer &lt;code&gt; &lt;price_ss&gt;</code> - Sell card to another user for Spirit Stones.\n"
         "• <code>/buyoffer &lt;offer_id&gt;</code> - Buy an offered card.\n"
-        "• <code>/swap &lt;your_code&gt; &lt;their_code&gt;</code> - Swap cards (strictly SAME TIER only!).\n"
-        "• <code>/claim</code> - Claim dropped cards (Drops automatically after 100 GC messages!).\n\n"
+        "• <code>/swap &lt;your_code&gt; &lt;their_code&gt;</code> - Swap cards (strictly SAME TIER only!).\n\n"
         "📌 <b>General Commands:</b>\n"
         "• <code>/help</code> ya <code>/start</code> - Help menu dekhein.\n"
         "• <code>/statsgc</code> - Group chat stats &amp; memory info dekhein.\n"
@@ -1810,6 +1980,9 @@ async def mongoexport_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         "users": users_db,
         "reminders": reminders_db,
         "groq_keys": GROQ_KEYS,
+        "cards_pool": cards_pool_db,
+        "user_cards": user_cards_db,
+        "user_economy": user_economy_db,
         "exported_at": time.time()
     }
 
@@ -1820,7 +1993,7 @@ async def mongoexport_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_document(
         document=bytes_io,
         filename=filename,
-        caption="📤 <b>MongoDB Data Export Complete!</b>\nAll users, reminders, and Groq API keys exported successfully.",
+        caption="📤 <b>MongoDB Data Export Complete!</b>\nAll users, reminders, Groq API keys, cards, and economy exported successfully.",
         parse_mode="HTML"
     )
 
@@ -1839,6 +2012,9 @@ async def mongoimport_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         save_users_data(users_db)
         save_reminders(reminders_db)
         save_stored_keys(GROQ_KEYS)
+        save_cards_pool(cards_pool_db)
+        save_user_cards(user_cards_db)
+        save_user_economy(user_economy_db)
         await update.message.reply_text("📥 <b>Local Data Synced to MongoDB Successfully!</b>", parse_mode="HTML")
         return
 
@@ -1850,6 +2026,9 @@ async def mongoimport_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         imp_users = imp_data.get("users", {})
         imp_reminders = imp_data.get("reminders", {})
         imp_keys = imp_data.get("groq_keys", [])
+        imp_cards_pool = imp_data.get("cards_pool", [])
+        imp_user_cards = imp_data.get("user_cards", {})
+        imp_user_economy = imp_data.get("user_economy", {})
 
         if imp_users:
             users_db.update(imp_users)
@@ -1865,11 +2044,27 @@ async def mongoimport_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                     GROQ_KEYS.append(k)
             save_stored_keys(GROQ_KEYS)
 
+        if imp_cards_pool:
+            cards_pool_db.clear()
+            cards_pool_db.extend(imp_cards_pool)
+            save_cards_pool(cards_pool_db)
+
+        if imp_user_cards:
+            user_cards_db.update(imp_user_cards)
+            save_user_cards(user_cards_db)
+
+        if imp_user_economy:
+            user_economy_db.update(imp_user_economy)
+            save_user_economy(user_economy_db)
+
         await update.message.reply_text(
             f"📥 <b>MongoDB Data Import Successful!</b>\n"
             f"• Users: <code>{len(imp_users)}</code>\n"
             f"• Reminders: <code>{len(imp_reminders)}</code>\n"
-            f"• Keys: <code>{len(imp_keys)}</code>",
+            f"• Keys: <code>{len(imp_keys)}</code>\n"
+            f"• Base Cards: <code>{len(imp_cards_pool)}</code>\n"
+            f"• User Cards: <code>{len(imp_user_cards)}</code>\n"
+            f"• Economies: <code>{len(imp_user_economy)}</code>",
             parse_mode="HTML"
         )
     except Exception as e:
@@ -2074,24 +2269,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             group_message_counts[chat_id] = 0
             dropped_tier = roll_card_tier()
             matching_pool = [c for c in cards_pool_db if c.get("tier", "").lower() == dropped_tier.lower()]
-            c_name = random.choice(matching_pool)["name"] if matching_pool else f"{dropped_tier} Cultivator"
-            c_photo = random.choice(matching_pool).get("photo", "") if matching_pool else ""
-            active_drops[chat_id] = {"name": c_name, "tier": dropped_tier, "photo": c_photo}
-            tier_str = TIER_EMOJIS.get(dropped_tier, dropped_tier)
+
+            if matching_pool:
+                base_card = random.choice(matching_pool)
+                c_name = base_card.get("name", f"{dropped_tier} Cultivator")
+                c_photo = base_card.get("photo", "")
+            else:
+                c_name = f"{dropped_tier} Cultivator"
+                c_photo = ""
+
+            active_drops[chat_id] = {
+                "name": c_name,
+                "tier": dropped_tier,
+                "photo": c_photo,
+                "worth": TIER_WORTH.get(dropped_tier, 200)
+            }
+
+            symbol = TIER_SYMBOLS.get(dropped_tier, "⚪️")
+            c_name_esc = escape_html(c_name)
 
             drop_msg = (
-                f"🌌 <b>CULTIVATION ANIME CARD DROPPED!</b> 🎴\n\n"
-                f"⚔️ <b>Character:</b> <b>{escape_html(c_name)}</b>\n"
-                f"✨ <b>Tier:</b> {tier_str}\n\n"
-                f"👉 <b>Type <code>/claim</code> to claim this card to your roster!</b>"
+                f"A {dropped_tier} {symbol} recruit {c_name_esc} has appeared...\n\n"
+                f"Use /recruit to bring them into your crew"
             )
             if c_photo:
                 try:
-                    await message.reply_photo(photo=c_photo, caption=drop_msg, parse_mode='HTML')
+                    await message.reply_photo(photo=c_photo, caption=drop_msg)
                 except Exception:
-                    await message.reply_text(drop_msg, parse_mode='HTML')
+                    await message.reply_text(drop_msg)
             else:
-                await message.reply_text(drop_msg, parse_mode='HTML')
+                await message.reply_text(drop_msg)
 
         # 1. CHECK & DELIVER ANY PENDING REMINDERS FOR THIS USER (TARGET WAITING NOTES)
         pending_notes = check_and_get_pending_reminders(chat_id, user)
@@ -2257,9 +2464,12 @@ def main():
     app.add_handler(CommandHandler("mycards", mycards_command))
     app.add_handler(CommandHandler("roster", mycards_command))
     app.add_handler(CommandHandler("showcard", showcard_command))
+    app.add_handler(CommandHandler("removecard", removecard_command))
+    app.add_handler(CommandHandler("allcards", allcards_command))
     app.add_handler(CommandHandler("daily", daily_command))
     app.add_handler(CommandHandler("pillshop", pillshop_command))
     app.add_handler(CommandHandler("buypill", buypill_command))
+    app.add_handler(CommandHandler("buy", buypill_command))
     app.add_handler(CommandHandler("inventory", inventory_command))
     app.add_handler(CommandHandler("cultivate", cultivate_command))
     app.add_handler(CommandHandler("addcard", addcard_command))
