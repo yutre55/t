@@ -7,6 +7,7 @@ import asyncio
 import logging
 import re
 import threading
+import urllib.request
 import pymongo
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import List, Dict, Set, Optional
@@ -623,6 +624,14 @@ async def get_llm_reply(messages: List[Dict[str, str]]) -> str:
     if total_keys == 0:
         return "Koi API Key set nahi hai."
 
+    preferred_models = [
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "qwen/qwen3.8-27b",
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant"
+    ]
+
     for attempt in range(total_keys * 2):
         key_idx = rate_tracker.get_best_key_index()
         
@@ -638,31 +647,38 @@ async def get_llm_reply(messages: List[Dict[str, str]]) -> str:
         rate_tracker.record_request(key_idx)
         recent_req_count = len(rate_tracker.request_timestamps[key_idx])
 
-        try:
-            logger.info(f"🚀 Calling Groq API with Key #{key_idx + 1}/{total_keys} (RPM Window: {recent_req_count}/30 reqs)...")
-            client = AsyncOpenAI(
-                base_url="https://api.groq.com/openai/v1",
-                api_key=api_key
-            )
-            response = await client.chat.completions.create(
-                model="openai/gpt-oss-120b",
-                messages=messages,
-                max_tokens=800
-            )
-            return response.choices[0].message.content
+        for m_name in preferred_models:
+            try:
+                logger.info(f"🚀 Calling Groq API ({m_name}) with Key #{key_idx + 1}/{total_keys} (RPM Window: {recent_req_count}/30 reqs)...")
+                client = AsyncOpenAI(
+                    base_url="https://api.groq.com/openai/v1",
+                    api_key=api_key
+                )
+                response = await client.chat.completions.create(
+                    model=m_name,
+                    messages=messages,
+                    max_tokens=800
+                )
+                return response.choices[0].message.content
 
-        except Exception as e:
-            err_str = str(e).lower()
-            logger.warning(f"❌ Key #{key_idx + 1} failed with error: {e}")
+            except Exception as e:
+                err_str = str(e).lower()
+                logger.warning(f"❌ Key #{key_idx + 1} with model '{m_name}' failed with error: {e}")
 
-            if "rpd" in err_str or "tpd" in err_str or "daily" in err_str:
-                logger.error(f"🔴 Key #{key_idx + 1} hit DAILY limit (RPD/TPD). Setting 24h cooldown...")
-                rate_tracker.set_cooldown(key_idx, duration_seconds=86400.0)
-            elif "429" in err_str or "rate limit" in err_str or "rpm" in err_str or "tpm" in err_str or "quota" in err_str:
-                logger.warning(f"🟡 Key #{key_idx + 1} hit MINUTE limit (RPM/TPM/429). Setting 60s cooldown and rotating...")
-                rate_tracker.set_cooldown(key_idx, duration_seconds=60.0)
-            else:
-                rate_tracker.set_cooldown(key_idx, duration_seconds=15.0)
+                if "rpd" in err_str or "tpd" in err_str or "daily" in err_str:
+                    logger.error(f"🔴 Key #{key_idx + 1} hit DAILY limit (RPD/TPD). Setting 24h cooldown...")
+                    rate_tracker.set_cooldown(key_idx, duration_seconds=86400.0)
+                    break
+                elif "429" in err_str or "rate limit" in err_str or "rpm" in err_str or "tpm" in err_str or "quota" in err_str:
+                    logger.warning(f"🟡 Key #{key_idx + 1} hit MINUTE limit (RPM/TPM/429). Setting 60s cooldown and rotating...")
+                    rate_tracker.set_cooldown(key_idx, duration_seconds=60.0)
+                    break
+                elif "model" in err_str or "404" in err_str or "not found" in err_str or "does not exist" in err_str:
+                    logger.warning(f"⚠️ Model '{m_name}' not found on Groq, trying fallback model...")
+                    continue
+                else:
+                    rate_tracker.set_cooldown(key_idx, duration_seconds=15.0)
+                    break
 
     return "Abhi saare API keys busy/rate-limited hain, thodi der baad try karein."
 
@@ -691,30 +707,31 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user_id = user.id if user else 0
 
     help_text = (
-        "🤖 **Sylvi AI Group Assistant & Chat Bot - Help Menu**\n\n"
-        "📌 **General Commands:**\n"
-        "• `/help` ya `/start` - Sabhi available commands ki list dekhein.\n"
-        "• `/statsgc` - Current group chat ki stats aur memory info dekhein.\n"
-        "• `/4words` - Start a 4-letter word guessing game (30 tries + hints!).\n"
-        "• `/4words stop` - End the active 4-letter word game.\n\n"
-        "🔥 **Bot Features & Style:**\n"
-        "• **AI Name:** Bot ka naam **Sylvi** hai! Group mein message reply karke, `@username` mention karke, ya **Sylvi** bolkar sawaal poocho.\n"
-        "• **Normal Human Vibe:** Bot bilkul normal, friendly aur helpful insaan ki tarah Hinglish mein baat karta hai.\n"
-        "• **Unique Username Tagging:** Jab kisi ko tag karne bolenge, bot us user ke profile ka unique handle (`@username`) dhoond kar tag karega.\n"
-        "• **Automatic Reminders / Target Waiting Notes:** Agar aap kisi ke Name ya Username par message chhodenge (e.g. 'Rahul jab message kare usko bolna meeting 5 baje hai'), toh jaise hi target user GC mein message karega, bot use turant wo message bol dega!\n"
-        "• **Comprehensive User Data Sync:** Past chat history, replies, new joins se sabhi users ke Name aur Unique Handle database mein sync hotey hain.\n"
+        "🤖 <b>Sylvi AI Group Assistant &amp; Chat Bot - Help Menu</b>\n\n"
+        "📌 <b>General Commands:</b>\n"
+        "• <code>/help</code> ya <code>/start</code> - Sabhi available commands ki list dekhein.\n"
+        "• <code>/statsgc</code> - Current group chat ki stats aur memory info dekhein.\n"
+        "• <code>/4words</code> - Start a 4-letter word guessing game (30 tries + hints!).\n"
+        "• <code>/4words stop</code> - End the active 4-letter word game.\n\n"
+        "🔥 <b>Bot Features &amp; Style:</b>\n"
+        "• <b>AI Name:</b> Bot ka naam <b>Sylvi</b> hai! Group mein message reply karke, <code>@username</code> mention karke, ya <b>Sylvi</b> bolkar sawaal poocho.\n"
+        "• <b>Normal Human Vibe:</b> Bot bilkul normal, friendly aur helpful insaan ki tarah Hinglish mein baat karta hai.\n"
+        "• <b>Unique Username Tagging:</b> Jab kisi ko tag karne bolenge, bot us user ke profile ka unique handle (<code>@username</code>) dhoond kar tag karega.\n"
+        "• <b>Automatic Reminders / Target Waiting Notes:</b> Agar aap kisi ke Name ya Username par message chhodenge (e.g. 'Rahul jab message kare usko bolna meeting 5 baje hai'), toh jaise hi target user GC mein message karega, bot use turant wo message bol dega!\n"
+        "• <b>Comprehensive User Data Sync:</b> Past chat history, replies, new joins se sabhi users ke Name aur Unique Handle database mein sync hotey hain.\n"
     )
 
     if is_owner(user_id):
         help_text += (
-            "\n👑 **Owner Special Commands:**\n"
-            "• `/addapi <key>` - Dynamic Nayi Groq API key add karein (5th, 6th & more keys).\n"
-            "• `/listapi` - Sabhi active Groq API keys ka status dekhein.\n"
-            "• `/allusers` - Total collected users database stats dekhein.\n"
-            "• **Personal DM:** Private chat mein bot exclusively Owner ke sath chat karega aur commands bhi chalenge.\n"
+            "\n👑 <b>Owner Special Commands:</b>\n"
+            "• <code>/addapi &lt;key&gt;</code> - Dynamic Nayi Groq API key add karein.\n"
+            "• <code>/listapi</code> - Sabhi active Groq API keys ka status dekhein.\n"
+            "• <code>/allusers</code> - Total collected users database stats dekhein.\n"
+            "• <code>/mongoexport</code> - Mongo DB backup JSON export karein.\n"
+            "• <code>/mongoimport</code> - Local JSON data Mongo DB mein sync karein.\n"
         )
 
-    await update.message.reply_text(help_text, parse_mode='Markdown')
+    await update.message.reply_text(help_text, parse_mode='HTML')
 
 async def addapi_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Owner command to add a new Groq API key dynamically."""
@@ -1054,8 +1071,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 )
                 await message.reply_text(text, parse_mode='HTML')
                 return
-                await message.reply_text(text, parse_mode='HTML')
-                return
 
             elif status == "already_guessed":
                 attempts_left = result["attempts_left"]
@@ -1065,26 +1080,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 )
                 return
 
-    # ==================== PRIVATE CHAT RESTRICTION ====================
+    # ==================== PRIVATE CHAT HANDLING ====================
     if chat_type == 'private':
         user_id = user.id if user else 0
-        if not is_owner(user_id):
-            logger.info(f"Private chat message received from non-owner {user_id}. Sending group redirect link...")
-            await message.reply_text(
-                "🚫 **AI Chat personal DM mein allowed nahi hai!**\n\n"
-                "AI Bot ko use karne ke liye hamare Group Chat ko join karein:\n"
-                f"👉 {GROUP_LINK}"
-            )
-            return
+        user_is_owner = is_owner(user_id)
+        role_label = " (Owner)" if user_is_owner else ""
+        logger.info(f"Private DM message received from {sender_name} ({user_id}){role_label}: {user_text[:30]}...")
 
-        logger.info(f"Owner {user_id} sent private DM message: {user_text[:30]}...")
-        # Owner DM Processing with normal human-like AI named Sylvi
+        owner_context = " Aap apne Owner ke saath baat kar rahe ho." if user_is_owner else ""
         messages_payload = [
             {
                 "role": "system",
                 "content": (
-                    "Aapka naam Sylvi hai. Aap ek friendly, smart aur helpful human-like Hinglish AI assistant ho. Aap apne Owner ke saath baat kar rahe ho. "
-                    "Friendly, polite, natural human tone aur helpful manner mein reply do."
+                    f"Aapka naam Sylvi hai. Aap ek friendly, smart aur helpful human-like Hinglish AI assistant ho.{owner_context} "
+                    "Aap Telegram user ke saath private DM mein baat kar rahe ho. "
+                    "Friendly, polite, natural human tone aur helpful manner mein clear Hinglish/English mein reply do."
                 )
             },
             {"role": "user", "content": f"{sender_name}: {user_text}"}
@@ -1213,6 +1223,31 @@ def start_health_check_server():
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         logger.info(f"🌐 Health check HTTP server started on port {port}")
+
+        # Start self-ping keep-alive background thread to prevent Render free tier sleeping
+        def keep_alive_ping():
+            time.sleep(15)  # Wait for server startup
+            target_urls = [f"http://127.0.0.1:{port}/"]
+            ext_url = os.getenv("RENDER_EXTERNAL_URL")
+            if ext_url:
+                if not ext_url.endswith("/"):
+                    ext_url += "/"
+                target_urls.append(ext_url)
+
+            while True:
+                for u in target_urls:
+                    try:
+                        req = urllib.request.Request(u, headers={"User-Agent": "SylviBotKeepAlive/1.0"})
+                        with urllib.request.urlopen(req, timeout=10) as resp:
+                            pass
+                    except Exception as ex:
+                        logger.debug(f"Keep-alive ping to {u} result: {ex}")
+                time.sleep(240)  # Ping every 4 minutes (before Render 15-minute sleep threshold)
+
+        ping_thread = threading.Thread(target=keep_alive_ping, daemon=True)
+        ping_thread.start()
+        logger.info("⚡ Render auto-ping keep-alive service started (4-min interval).")
+
     except Exception as e:
         logger.warning(f"Could not start health check HTTP server: {e}")
 
