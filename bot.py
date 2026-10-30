@@ -1207,13 +1207,11 @@ async def showcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     stay_time = format_time_left(card)
 
     text = (
-        f"🎴 <b>CULTIVATION CARD DETAILS</b>\n\n"
-        f"⚔️ <b>Name:</b> <b>{c_name}</b>\n"
+        f"⚔️ <b>Name:</b> {c_name}\n"
+        f"🔑 <b>Code:</b> <code>{code}</code>\n"
         f"💎 <b>Worth:</b> <code>{worth} SS</code>\n"
         f"✨ <b>Tier:</b> {tier_emoji}\n"
-        f"⏳ <b>Stay Time in Crew:</b> <code>{stay_time}</code>\n"
-        f"🔑 <b>Code:</b> <code>{code}</code>\n"
-        f"👤 <b>Owner:</b> {owner_name}"
+        f"⏳ <b>Stay Time in Crew:</b> <code>{stay_time}</code>"
     )
 
     if card.get("photo"):
