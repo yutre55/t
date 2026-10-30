@@ -1119,6 +1119,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Owner command to set the target group chat ID for real-time activity logs."""
+    global LOGS_GC_ID
     message = update.effective_message
     user = update.effective_user
     if not message or not user:
@@ -1130,7 +1131,6 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     args = context.args or []
     if not args:
         chat_id = message.chat.id
-        global LOGS_GC_ID
         LOGS_GC_ID = chat_id
         save_logs_gc_id(chat_id)
         await message.reply_text(
@@ -1142,7 +1142,6 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     try:
         target_id = int(args[0].strip())
-        global LOGS_GC_ID
         LOGS_GC_ID = target_id
         save_logs_gc_id(target_id)
         await message.reply_text(
@@ -1553,6 +1552,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Owner command to set the target group chat ID for real-time activity logs."""
+    global LOGS_GC_ID
     message = update.effective_message
     user = update.effective_user
     if not message or not user:
@@ -1564,7 +1564,6 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     args = context.args or []
     if not args:
         chat_id = message.chat.id
-        global LOGS_GC_ID
         LOGS_GC_ID = chat_id
         save_logs_gc_id(chat_id)
         await message.reply_text(
@@ -1576,7 +1575,6 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     try:
         target_id = int(args[0].strip())
-        global LOGS_GC_ID
         LOGS_GC_ID = target_id
         save_logs_gc_id(target_id)
         await message.reply_text(
@@ -2307,6 +2305,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Owner command to set the target group chat ID for real-time activity logs."""
+    global LOGS_GC_ID
     message = update.effective_message
     user = update.effective_user
     if not message or not user:
@@ -2318,7 +2317,6 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     args = context.args or []
     if not args:
         chat_id = message.chat.id
-        global LOGS_GC_ID
         LOGS_GC_ID = chat_id
         save_logs_gc_id(chat_id)
         await message.reply_text(
@@ -2330,7 +2328,6 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     try:
         target_id = int(args[0].strip())
-        global LOGS_GC_ID
         LOGS_GC_ID = target_id
         save_logs_gc_id(target_id)
         await message.reply_text(
@@ -2560,6 +2557,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Owner command to set the target group chat ID for real-time activity logs."""
+    global LOGS_GC_ID
     message = update.effective_message
     user = update.effective_user
     if not message or not user:
@@ -2571,7 +2569,6 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     args = context.args or []
     if not args:
         chat_id = message.chat.id
-        global LOGS_GC_ID
         LOGS_GC_ID = chat_id
         save_logs_gc_id(chat_id)
         await message.reply_text(
@@ -2583,7 +2580,6 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     try:
         target_id = int(args[0].strip())
-        global LOGS_GC_ID
         LOGS_GC_ID = target_id
         save_logs_gc_id(target_id)
         await message.reply_text(
@@ -3245,6 +3241,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Owner command to set the target group chat ID for real-time activity logs."""
+    global LOGS_GC_ID
     message = update.effective_message
     user = update.effective_user
     if not message or not user:
@@ -3256,7 +3253,6 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     args = context.args or []
     if not args:
         chat_id = message.chat.id
-        global LOGS_GC_ID
         LOGS_GC_ID = chat_id
         save_logs_gc_id(chat_id)
         await message.reply_text(
@@ -3268,7 +3264,6 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     try:
         target_id = int(args[0].strip())
-        global LOGS_GC_ID
         LOGS_GC_ID = target_id
         save_logs_gc_id(target_id)
         await message.reply_text(
