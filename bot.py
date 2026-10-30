@@ -3,6 +3,7 @@ import io
 import json
 import time
 import random
+import string
 import asyncio
 import logging
 import re
@@ -203,6 +204,300 @@ def save_reminders(data: Dict[str, List[Dict]]):
             logger.error(f"Error saving reminders to MongoDB: {e}")
 
 reminders_db: Dict[str, List[Dict]] = load_reminders()
+
+# ==================== CULTIVATION CARD & ECONOMY STORAGE ====================
+CARDS_POOL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cards_pool.json")
+USER_CARDS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_cards.json")
+USER_ECONOMY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_economy.json")
+
+DEFAULT_CARDS_POOL = [
+    # Mortal
+    {"id": "M001", "name": "Xiao Yan (Novice Disciple)", "tier": "Mortal", "photo": ""},
+    {"id": "M002", "name": "Lin Fan (Outer Disciple)", "tier": "Mortal", "photo": ""},
+    {"id": "M003", "name": "Li Qiye (Novice Weaver)", "tier": "Mortal", "photo": ""},
+    {"id": "M004", "name": "Tang San (Spirit Scholar)", "tier": "Mortal", "photo": ""},
+    # Awakened
+    {"id": "A001", "name": "Xiao Yan (Flame Master)", "tier": "Awakened", "photo": ""},
+    {"id": "A002", "name": "Tang San (Blue Silver Grass)", "tier": "Awakened", "photo": ""},
+    {"id": "A003", "name": "Ye Chen (Immortal Sword)", "tier": "Awakened", "photo": ""},
+    # Transcendent
+    {"id": "T001", "name": "Lin Feng (Sword Sovereign)", "tier": "Transcendent", "photo": ""},
+    {"id": "T002", "name": "Han Li (Ascendant)", "tier": "Transcendent", "photo": ""},
+    {"id": "T003", "name": "Shi Hao (Grand Emperor)", "tier": "Transcendent", "photo": ""},
+    # Celestial
+    {"id": "C001", "name": "Sung Jin-Woo (Shadow Monarch)", "tier": "Celestial", "photo": ""},
+    {"id": "C002", "name": "Anlan (Ancient Celestial)", "tier": "Celestial", "photo": ""},
+    {"id": "C003", "name": "Lu Sheng (Dao Master)", "tier": "Celestial", "photo": ""},
+    # Primordial
+    {"id": "P001", "name": "Hongjun (Ancestor of Dao)", "tier": "Primordial", "photo": ""},
+    {"id": "P002", "name": "Pangu (Creator God)", "tier": "Primordial", "photo": ""},
+    {"id": "P003", "name": "Chaos Origin Sovereign", "tier": "Primordial", "photo": ""}
+]
+
+def load_cards_pool() -> List[Dict]:
+    db = get_mongo_db()
+    if db is not None:
+        try:
+            docs = list(db["cards_pool"].find({}))
+            if docs:
+                for d in docs:
+                    d.pop("_id", None)
+                return docs
+        except Exception as e:
+            logger.error(f"Error loading cards_pool from MongoDB: {e}")
+
+    if os.path.exists(CARDS_POOL_FILE):
+        try:
+            with open(CARDS_POOL_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Error loading cards_pool.json: {e}")
+    return list(DEFAULT_CARDS_POOL)
+
+def save_cards_pool(pool: List[Dict]):
+    try:
+        with open(CARDS_POOL_FILE, "w", encoding="utf-8") as f:
+            json.dump(pool, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Error saving cards_pool.json: {e}")
+
+    db = get_mongo_db()
+    if db is not None and pool:
+        try:
+            col = db["cards_pool"]
+            bulk = [pymongo.ReplaceOne({"id": c["id"]}, {"_id": c["id"], **c}, upsert=True) for c in pool]
+            col.bulk_write(bulk)
+        except Exception as e:
+            logger.error(f"Error saving cards_pool to MongoDB: {e}")
+
+cards_pool_db: List[Dict] = load_cards_pool()
+
+def load_user_cards() -> Dict[str, Dict]:
+    db = get_mongo_db()
+    if db is not None:
+        try:
+            docs = list(db["user_cards"].find({}))
+            if docs:
+                m_data = {}
+                for d in docs:
+                    code = str(d.pop("_id"))
+                    m_data[code] = d
+                return m_data
+        except Exception as e:
+            logger.error(f"Error loading user_cards from MongoDB: {e}")
+
+    if os.path.exists(USER_CARDS_FILE):
+        try:
+            with open(USER_CARDS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Error loading user_cards.json: {e}")
+    return {}
+
+def save_user_cards(data: Dict[str, Dict]):
+    try:
+        with open(USER_CARDS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Error saving user_cards.json: {e}")
+
+    db = get_mongo_db()
+    if db is not None:
+        try:
+            col = db["user_cards"]
+            if data:
+                bulk = [pymongo.ReplaceOne({"_id": code}, {"_id": code, **c_info}, upsert=True) for code, c_info in data.items()]
+                col.bulk_write(bulk)
+        except Exception as e:
+            logger.error(f"Error saving user_cards to MongoDB: {e}")
+
+user_cards_db: Dict[str, Dict] = load_user_cards()
+
+def load_user_economy() -> Dict[str, Dict]:
+    db = get_mongo_db()
+    if db is not None:
+        try:
+            docs = list(db["user_economy"].find({}))
+            if docs:
+                m_data = {}
+                for d in docs:
+                    uid = str(d.pop("_id"))
+                    m_data[uid] = d
+                return m_data
+        except Exception as e:
+            logger.error(f"Error loading user_economy from MongoDB: {e}")
+
+    if os.path.exists(USER_ECONOMY_FILE):
+        try:
+            with open(USER_ECONOMY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Error loading user_economy.json: {e}")
+    return {}
+
+def save_user_economy(data: Dict[str, Dict]):
+    try:
+        with open(USER_ECONOMY_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Error saving user_economy.json: {e}")
+
+    db = get_mongo_db()
+    if db is not None:
+        try:
+            col = db["user_economy"]
+            if data:
+                bulk = [pymongo.ReplaceOne({"_id": uid}, {"_id": uid, **u_info}, upsert=True) for uid, u_info in data.items()]
+                col.bulk_write(bulk)
+        except Exception as e:
+            logger.error(f"Error saving user_economy to MongoDB: {e}")
+
+user_economy_db: Dict[str, Dict] = load_user_economy()
+
+active_card_offers: Dict[str, Dict] = {}  # offer_id -> {"code", "seller_id", "price_ss", "time"}
+active_card_swaps: Dict[str, Dict] = {}   # swap_id -> {"from_user_id", "to_user_id", "from_code", "to_code", "tier", "time"}
+group_message_counts: Dict[int, int] = {} # chat_id -> msg_count for 100-msg drop trigger
+active_drops: Dict[int, Dict] = {}        # chat_id -> dropped card info
+
+def generate_unique_card_code() -> str:
+    """Generates a unique 4-character alphanumeric code for a claimed card."""
+    chars = string.ascii_uppercase + string.digits
+    while True:
+        code = ''.join(random.choices(chars, k=4))
+        if code not in user_cards_db:
+            return code
+
+def clean_expired_cards():
+    """Removes non-permanent cards from user_cards_db whose stay limit has expired."""
+    now = time.time()
+    expired_codes = []
+    for code, card in list(user_cards_db.items()):
+        if not card.get("is_permanent", False):
+            expire_at = card.get("expire_at", 0)
+            if now > expire_at:
+                expired_codes.append(code)
+
+    if expired_codes:
+        for code in expired_codes:
+            user_cards_db.pop(code, None)
+            db = get_mongo_db()
+            if db is not None:
+                try:
+                    db["user_cards"].delete_one({"_id": code})
+                except Exception as e:
+                    logger.error(f"Error deleting expired card {code} from MongoDB: {e}")
+        save_user_cards(user_cards_db)
+        logger.info(f"🧹 Cleaned {len(expired_codes)} expired cards from roster.")
+
+def format_time_left(card: Dict) -> str:
+    if card.get("is_permanent", False):
+        return "Permanent ♾️"
+    expire_at = card.get("expire_at", 0)
+    now = time.time()
+    diff = expire_at - now
+    if diff <= 0:
+        return "Expired 💀"
+    days = int(diff // 86400)
+    hours = int((diff % 86400) // 3600)
+    mins = int((diff % 3600) // 60)
+    if days > 0:
+        return f"{days}d {hours}h remaining"
+    elif hours > 0:
+        return f"{hours}h {mins}m remaining"
+    else:
+        return f"{mins}m remaining"
+
+def get_user_economy(user_id: int) -> Dict:
+    uid_str = str(user_id)
+    if uid_str not in user_economy_db:
+        user_economy_db[uid_str] = {
+            "user_id": user_id,
+            "spirit_stones": 0,
+            "pills": {
+                "Qi Gathering Pill": 0,
+                "Jade Spirit Pill": 0,
+                "Heavenly Life Pill": 0,
+                "Emperor's Longevity Pill": 0,
+                "Eternal Life Pill": 0
+            },
+            "last_daily": 0.0
+        }
+        save_user_economy(user_economy_db)
+    else:
+        u = user_economy_db[uid_str]
+        if "pills" not in u:
+            u["pills"] = {
+                "Qi Gathering Pill": 0,
+                "Jade Spirit Pill": 0,
+                "Heavenly Life Pill": 0,
+                "Emperor's Longevity Pill": 0,
+                "Eternal Life Pill": 0
+            }
+    return user_economy_db[uid_str]
+
+TIER_EMOJIS = {
+    "Mortal": "⚪ Mortal",
+    "Awakened": "🟢 Awakened",
+    "Transcendent": "🔵 Transcendent",
+    "Celestial": "🟣 Celestial",
+    "Primordial": "🔥 Primordial"
+}
+
+def roll_card_tier() -> str:
+    """
+    Tier Probabilities:
+    - Mortal: 95.09%
+    - Awakened: 3.50%
+    - Transcendent: 1.20%
+    - Celestial: 0.20%
+    - Primordial: 0.01%
+    """
+    roll = random.uniform(0, 100)
+    if roll < 0.01:
+        return "Primordial"
+    elif roll < 0.21:
+        return "Celestial"
+    elif roll < 1.41:
+        return "Transcendent"
+    elif roll < 4.91:
+        return "Awakened"
+    else:
+        return "Mortal"
+
+def create_card_instance(owner_id: int, forced_tier: Optional[str] = None) -> Dict:
+    tier = forced_tier if forced_tier else roll_card_tier()
+    matching_pool = [c for c in cards_pool_db if c.get("tier", "").lower() == tier.lower()]
+
+    if not matching_pool:
+        base_card = {"id": f"DEF_{int(time.time())}", "name": f"{tier} Cultivator", "tier": tier, "photo": ""}
+    else:
+        base_card = random.choice(matching_pool)
+
+    code = generate_unique_card_code()
+    now = time.time()
+    card_data = {
+        "code": code,
+        "owner_id": owner_id,
+        "name": base_card.get("name", "Unknown Cultivator"),
+        "tier": tier,
+        "photo": base_card.get("photo", ""),
+        "obtained_at": now,
+        "expire_at": now + (72 * 3600),  # 72 hours default stay limit
+        "is_permanent": False
+    }
+
+    user_cards_db[code] = card_data
+    save_user_cards(user_cards_db)
+    logger.info(f"✨ Created Card '{card_data['name']}' [{tier}] Code={code} for User {owner_id}")
+    return card_data
+
+PILL_CATALOG = {
+    "1": {"name": "Qi Gathering Pill", "seconds": 24 * 3600, "price": 200, "desc": "+1 Day Stay"},
+    "2": {"name": "Jade Spirit Pill", "seconds": 3 * 24 * 3600, "price": 500, "desc": "+3 Days Stay"},
+    "3": {"name": "Heavenly Life Pill", "seconds": 9 * 24 * 3600, "price": 1200, "desc": "+9 Days Stay"},
+    "4": {"name": "Emperor's Longevity Pill", "seconds": 18 * 24 * 3600, "price": 2000, "desc": "+18 Days Stay"},
+    "5": {"name": "Eternal Life Pill", "seconds": -1, "price": 18000, "desc": "Permanent Stay ♾️"}
+}
 
 def track_user_data(user) -> None:
     if not user or getattr(user, "is_bot", False):
@@ -696,6 +991,640 @@ async def welcome_new_members_handler(update: Update, context: ContextTypes.DEFA
         name = member.first_name or "New Member"
         logger.info(f"👤 New member joined in group {chat_id}: {name}")
 
+# ==================== CULTIVATION CARD COMMANDS ====================
+
+async def summon_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Summons a random card with tier probabilities."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    clean_expired_cards()
+
+    card = create_card_instance(user.id)
+    tier_str = TIER_EMOJIS.get(card["tier"], card["tier"])
+    uname = escape_html(user.first_name)
+    c_name = escape_html(card["name"])
+    code = card["code"]
+    time_left = format_time_left(card)
+
+    text = (
+        f"🌌 <b>CULTIVATION CARD SUMMONED!</b>\n\n"
+        f"👤 <b>Summoner:</b> {uname}\n"
+        f"⚔️ <b>Character:</b> <b>{c_name}</b>\n"
+        f"✨ <b>Tier:</b> {tier_str}\n"
+        f"🔑 <b>Card Code:</b> <code>{code}</code>\n"
+        f"⏳ <b>Roster Stay Limit:</b> <code>{time_left}</code>\n\n"
+        f"💡 <i>Type <code>/showcard {code}</code> to view details or <code>/cultivate {code} &lt;pill&gt;</code> to extend stay time!</i>"
+    )
+
+    if card.get("photo"):
+        try:
+            await update.message.reply_photo(photo=card["photo"], caption=text, parse_mode='HTML')
+            return
+        except Exception as e:
+            logger.warning(f"Could not send card photo: {e}")
+
+    await update.message.reply_text(text, parse_mode='HTML')
+
+async def mycards_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Lists user's active cards and remaining stay limits."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    clean_expired_cards()
+
+    user_cards = [c for c in user_cards_db.values() if c.get("owner_id") == user.id]
+    uname = escape_html(user.first_name)
+
+    if not user_cards:
+        await update.message.reply_text(
+            f"📜 <b>{uname}'s Roster is Empty!</b>\n\n"
+            f"Type <code>/summon</code> or <code>/daily</code> to recruit your first cultivation card!",
+            parse_mode='HTML'
+        )
+        return
+
+    tier_order = {"Primordial": 5, "Celestial": 4, "Transcendent": 3, "Awakened": 2, "Mortal": 1}
+    user_cards.sort(key=lambda x: tier_order.get(x.get("tier", "Mortal"), 0), reverse=True)
+
+    lines = []
+    for c in user_cards[:25]:
+        code = c.get("code")
+        c_name = escape_html(c.get("name", "Hero"))
+        tier_str = TIER_EMOJIS.get(c.get("tier"), c.get("tier"))
+        t_left = format_time_left(c)
+        lines.append(f"• <code>{code}</code> | {tier_str} | <b>{c_name}</b> ({t_left})")
+
+    cards_str = "\n".join(lines)
+    total_count = len(user_cards)
+
+    await update.message.reply_text(
+        f"📜 <b>{uname}'s Cultivation Roster ({total_count} Cards):</b>\n\n"
+        f"{cards_str}\n\n"
+        f"💡 Use <code>/showcard &lt;code&gt;</code> to view details or <code>/cultivate &lt;code&gt; &lt;pill&gt;</code> to feed pills!",
+        parse_mode='HTML'
+    )
+
+async def showcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays details of a specific card by 4-digit code."""
+    if not update.message:
+        return
+
+    clean_expired_cards()
+    args = context.args or []
+    if not args:
+        await update.message.reply_text("⚠️ Usage: <code>/showcard &lt;4-digit_code&gt;</code> (e.g. <code>/showcard X82K</code>)", parse_mode='HTML')
+        return
+
+    code = args[0].strip().upper()
+    card = user_cards_db.get(code)
+
+    if not card:
+        await update.message.reply_text(f"❌ Card code <code>{code}</code> not found or has expired from roster!", parse_mode='HTML')
+        return
+
+    owner_id = card.get("owner_id")
+    owner_info = users_db.get(str(owner_id), {})
+    owner_name = escape_html(owner_info.get("first_name", f"User {owner_id}"))
+
+    c_name = escape_html(card.get("name", "Cultivator"))
+    tier_str = TIER_EMOJIS.get(card.get("tier"), card.get("tier"))
+    t_left = format_time_left(card)
+
+    text = (
+        f"🎴 <b>CULTIVATION CARD DETAILS</b>\n\n"
+        f"🔑 <b>Code:</b> <code>{code}</code>\n"
+        f"⚔️ <b>Character:</b> <b>{c_name}</b>\n"
+        f"✨ <b>Tier:</b> {tier_str}\n"
+        f"👤 <b>Owner:</b> {owner_name}\n"
+        f"⏳ <b>Roster Stay Limit:</b> <code>{t_left}</code>\n\n"
+        f"💡 Feed pills with <code>/cultivate {code} &lt;pill_number_or_name&gt;</code> to extend stay duration!"
+    )
+
+    if card.get("photo"):
+        try:
+            await update.message.reply_photo(photo=card["photo"], caption=text, parse_mode='HTML')
+            return
+        except Exception as e:
+            logger.warning(f"Could not send card photo: {e}")
+
+    await update.message.reply_text(text, parse_mode='HTML')
+
+async def daily_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Claims daily free 500 Spirit Stones (SS) + 1 Mortal Card."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    eco = get_user_economy(user.id)
+    now = time.time()
+
+    last_daily = eco.get("last_daily", 0.0)
+    cooldown = 24 * 3600
+    time_passed = now - last_daily
+
+    if time_passed < cooldown:
+        remaining_sec = cooldown - time_passed
+        hours = int(remaining_sec // 3600)
+        mins = int((remaining_sec % 3600) // 60)
+        await update.message.reply_text(
+            f"⏳ <b>Daily reward already claimed!</b>\n\nPlease wait <code>{hours}h {mins}m</code> before claiming again.",
+            parse_mode='HTML'
+        )
+        return
+
+    eco["spirit_stones"] += 500
+    eco["last_daily"] = now
+    save_user_economy(user_economy_db)
+
+    mortal_card = create_card_instance(user.id, forced_tier="Mortal")
+    uname = escape_html(user.first_name)
+    c_name = escape_html(mortal_card["name"])
+    code = mortal_card["code"]
+    new_ss = eco["spirit_stones"]
+
+    await update.message.reply_text(
+        f"💎 <b>DAILY CULTIVATION REWARD CLAIMED!</b>\n\n"
+        f"👤 <b>Cultivator:</b> {uname}\n"
+        f"✨ <b>Reward Received:</b> <code>+500 Spirit Stones (SS)</code> 💎\n"
+        f"🎴 <b>Bonus Card:</b> ⚪ Mortal - <b>{c_name}</b> (Code: <code>{code}</code>)\n\n"
+        f"💰 <b>Total SS Balance:</b> <code>{new_ss} SS</code>",
+        parse_mode='HTML'
+    )
+
+async def pillshop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays Pill Shop catalog."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    eco = get_user_economy(user.id)
+    ss_bal = eco["spirit_stones"]
+
+    shop_lines = []
+    for num, item in PILL_CATALOG.items():
+        shop_lines.append(f"<b>{num}. {item['name']}</b>\n   • Effect: <code>{item['desc']}</code>\n   • Price: <code>{item['price']} SS</code>")
+
+    shop_text = "\n\n".join(shop_lines)
+
+    text = (
+        f"💊 <b>CULTIVATION PILL SHOP</b>\n\n"
+        f"💰 <b>Your Spirit Stones Balance:</b> <code>{ss_bal} SS</code>\n\n"
+        f"{shop_text}\n\n"
+        f"🛒 <b>Commands:</b>\n"
+        f"• Buy pills: <code>/buypill &lt;pill_number_or_name&gt; [qty]</code>\n"
+        f"• Check stock: <code>/inventory</code>\n"
+        f"• Feed card: <code>/cultivate &lt;card_code&gt; &lt;pill_number_or_name&gt;</code>"
+    )
+
+    await update.message.reply_text(text, parse_mode='HTML')
+
+async def buypill_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Purchases pills using Spirit Stones."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    eco = get_user_economy(user.id)
+
+    args = context.args or []
+    if not args:
+        await update.message.reply_text("⚠️ Usage: <code>/buypill &lt;pill_number_or_name&gt; [qty]</code> (e.g. <code>/buypill 1 2</code>)", parse_mode='HTML')
+        return
+
+    query = args[0].strip().lower()
+    qty = 1
+    if len(args) > 1 and args[1].isdigit():
+        qty = max(1, int(args[1]))
+
+    target_item = None
+    for num, item in PILL_CATALOG.items():
+        if query == num or query in item["name"].lower():
+            target_item = item
+            break
+
+    if not target_item:
+        await update.message.reply_text("❌ Invalid pill selection! Type <code>/pillshop</code> to view available pills.", parse_mode='HTML')
+        return
+
+    pill_name = target_item["name"]
+    unit_price = target_item["price"]
+    total_cost = unit_price * qty
+
+    if eco["spirit_stones"] < total_cost:
+        await update.message.reply_text(
+            f"❌ <b>Insufficient Spirit Stones!</b>\n\n"
+            f"• Total Cost: <code>{total_cost} SS</code>\n"
+            f"• Your Balance: <code>{eco['spirit_stones']} SS</code>",
+            parse_mode='HTML'
+        )
+        return
+
+    eco["spirit_stones"] -= total_cost
+    eco["pills"][pill_name] = eco["pills"].get(pill_name, 0) + qty
+    save_user_economy(user_economy_db)
+
+    await update.message.reply_text(
+        f"✅ <b>PURCHASE SUCCESSFUL!</b>\n\n"
+        f"💊 <b>Bought:</b> {qty}x <b>{pill_name}</b>\n"
+        f"💰 <b>Cost Paid:</b> <code>{total_cost} SS</code>\n"
+        f"💎 <b>Remaining Balance:</b> <code>{eco['spirit_stones']} SS</code>\n\n"
+        f"💡 Feed card using <code>/cultivate &lt;card_code&gt; {pill_name}</code>",
+        parse_mode='HTML'
+    )
+
+async def inventory_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Shows user Spirit Stones balance and owned pills stock."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    eco = get_user_economy(user.id)
+    uname = escape_html(user.first_name)
+
+    ss_bal = eco["spirit_stones"]
+    pills = eco.get("pills", {})
+
+    pill_lines = []
+    for num, item in PILL_CATALOG.items():
+        pname = item["name"]
+        count = pills.get(pname, 0)
+        pill_lines.append(f"• <b>{pname}:</b> <code>{count}</code> owned")
+
+    pills_str = "\n".join(pill_lines)
+
+    await update.message.reply_text(
+        f"🎒 <b>{uname}'s Cultivation Inventory:</b>\n\n"
+        f"💎 <b>Spirit Stones (SS):</b> <code>{ss_bal} SS</code>\n\n"
+        f"💊 <b>Pills Stock:</b>\n{pills_str}\n\n"
+        f"💡 Type <code>/pillshop</code> to buy more pills!",
+        parse_mode='HTML'
+    )
+
+async def cultivate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Feeds pill to card to extend stay duration or make permanent."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    clean_expired_cards()
+    eco = get_user_economy(user.id)
+
+    args = context.args or []
+    if len(args) < 2:
+        await update.message.reply_text(
+            "⚠️ Usage: <code>/cultivate &lt;card_code&gt; &lt;pill_number_or_name&gt;</code>\n"
+            "Example: <code>/cultivate X82K 1</code> or <code>/cultivate X82K Eternal Life Pill</code>",
+            parse_mode='HTML'
+        )
+        return
+
+    code = args[0].strip().upper()
+    pill_query = " ".join(args[1:]).strip().lower()
+
+    card = user_cards_db.get(code)
+    if not card or card.get("owner_id") != user.id:
+        await update.message.reply_text(f"❌ Card code <code>{code}</code> not found in your roster!", parse_mode='HTML')
+        return
+
+    target_item = None
+    for num, item in PILL_CATALOG.items():
+        if pill_query == num or pill_query in item["name"].lower():
+            target_item = item
+            break
+
+    if not target_item:
+        await update.message.reply_text("❌ Invalid pill specified! Check <code>/inventory</code> for your owned pills.", parse_mode='HTML')
+        return
+
+    pill_name = target_item["name"]
+    owned_count = eco.get("pills", {}).get(pill_name, 0)
+
+    if owned_count <= 0:
+        await update.message.reply_text(
+            f"❌ You don't have any <b>{pill_name}</b> in your inventory!\nType <code>/pillshop</code> to buy pills.",
+            parse_mode='HTML'
+        )
+        return
+
+    eco["pills"][pill_name] -= 1
+    save_user_economy(user_economy_db)
+
+    now = time.time()
+    if target_item["seconds"] == -1:
+        card["is_permanent"] = True
+    else:
+        current_expire = max(now, card.get("expire_at", now))
+        card["expire_at"] = current_expire + target_item["seconds"]
+
+    save_user_cards(user_cards_db)
+
+    c_name = escape_html(card.get("name"))
+    tier_str = TIER_EMOJIS.get(card.get("tier"), card.get("tier"))
+    new_time_left = format_time_left(card)
+
+    await update.message.reply_text(
+        f"✨ <b>CULTIVATION SUCCESSFUL!</b> 🧘‍♂️\n\n"
+        f"🎴 <b>Card:</b> {tier_str} - <b>{c_name}</b> (Code: <code>{code}</code>)\n"
+        f"💊 <b>Fed Pill:</b> {pill_name}\n"
+        f"⏳ <b>New Stay Limit:</b> <code>{new_time_left}</code>",
+        parse_mode='HTML'
+    )
+
+async def addcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Owner command to add a new character card to base pool."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user_id = update.message.from_user.id
+    if not is_owner(user_id):
+        await update.message.reply_text("🚫 Only the bot owner can use this command!")
+        return
+
+    args = context.args or []
+    if len(args) < 2:
+        await update.message.reply_text(
+            "⚠️ Usage: <code>/addcard &lt;Mortal|Awakened|Transcendent|Celestial|Primordial&gt; &lt;Character Name&gt;</code>\n"
+            "<i>(Tip: Send as caption to an image or reply to a photo to attach card image!)</i>",
+            parse_mode='HTML'
+        )
+        return
+
+    raw_tier = args[0].strip().capitalize()
+    valid_tiers = ["Mortal", "Awakened", "Transcendent", "Celestial", "Primordial"]
+
+    matched_tier = None
+    for vt in valid_tiers:
+        if raw_tier.lower() == vt.lower():
+            matched_tier = vt
+            break
+
+    if not matched_tier:
+        await update.message.reply_text(
+            f"⚠️ Invalid Tier <code>{raw_tier}</code>!\nValid tiers: <code>Mortal, Awakened, Transcendent, Celestial, Primordial</code>",
+            parse_mode='HTML'
+        )
+        return
+
+    char_name = " ".join(args[1:]).strip()
+    photo_file_id = ""
+
+    if update.message.photo:
+        photo_file_id = update.message.photo[-1].file_id
+    elif update.message.reply_to_message and update.message.reply_to_message.photo:
+        photo_file_id = update.message.reply_to_message.photo[-1].file_id
+
+    card_id = f"CARD_{int(time.time())}"
+    new_base_card = {
+        "id": card_id,
+        "name": char_name,
+        "tier": matched_tier,
+        "photo": photo_file_id
+    }
+
+    cards_pool_db.append(new_base_card)
+    save_cards_pool(cards_pool_db)
+
+    test_card = create_card_instance(user_id, forced_tier=matched_tier)
+    test_card["name"] = char_name
+    test_card["photo"] = photo_file_id
+    save_user_cards(user_cards_db)
+
+    await update.message.reply_text(
+        f"✅ <b>NEW CARD ADDED TO GLOBAL POOL!</b>\n\n"
+        f"⚔️ <b>Character:</b> <b>{escape_html(char_name)}</b>\n"
+        f"✨ <b>Tier:</b> {TIER_EMOJIS.get(matched_tier, matched_tier)}\n"
+        f"🔑 <b>Sample Roster Code:</b> <code>{test_card['code']}</code>\n\n"
+        f"Total Pool Size: <code>{len(cards_pool_db)} cards</code>",
+        parse_mode='HTML'
+    )
+
+async def offer_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Offers card for sale to another user in exchange for Spirit Stones."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    clean_expired_cards()
+
+    args = context.args or []
+    if len(args) < 2:
+        await update.message.reply_text("⚠️ Usage: <code>/offer &lt;card_code&gt; &lt;price_in_ss&gt;</code>", parse_mode='HTML')
+        return
+
+    code = args[0].strip().upper()
+    if not args[1].isdigit():
+        await update.message.reply_text("⚠️ Price must be a positive integer SS value!", parse_mode='HTML')
+        return
+
+    price = int(args[1])
+    card = user_cards_db.get(code)
+
+    if not card or card.get("owner_id") != user.id:
+        await update.message.reply_text(f"❌ Card code <code>{code}</code> not found in your roster!", parse_mode='HTML')
+        return
+
+    offer_id = f"OFFER_{int(time.time())}_{code}"
+    active_card_offers[offer_id] = {
+        "offer_id": offer_id,
+        "code": code,
+        "seller_id": user.id,
+        "price_ss": price,
+        "time": time.time()
+    }
+
+    c_name = escape_html(card.get("name"))
+    tier_str = TIER_EMOJIS.get(card.get("tier"), card.get("tier"))
+    seller_name = escape_html(user.first_name)
+
+    await update.message.reply_text(
+        f"🛍️ <b>CARD OFFER CREATED FOR SALE!</b>\n\n"
+        f"👤 <b>Seller:</b> {seller_name}\n"
+        f"🎴 <b>Card:</b> {tier_str} - <b>{c_name}</b> (Code: <code>{code}</code>)\n"
+        f"💎 <b>Asking Price:</b> <code>{price} SS</code>\n\n"
+        f"👉 Anyone can buy this card by typing: <code>/buyoffer {offer_id}</code>",
+        parse_mode='HTML'
+    )
+
+async def buyoffer_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Purchases an offered card using Spirit Stones."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    clean_expired_cards()
+
+    args = context.args or []
+    if not args:
+        await update.message.reply_text("⚠️ Usage: <code>/buyoffer &lt;offer_id&gt;</code>", parse_mode='HTML')
+        return
+
+    offer_id = args[0].strip()
+    offer = active_card_offers.get(offer_id)
+
+    if not offer:
+        await update.message.reply_text("❌ Offer expired or not found!", parse_mode='HTML')
+        return
+
+    code = offer["code"]
+    seller_id = offer["seller_id"]
+    price = offer["price_ss"]
+
+    if seller_id == user.id:
+        await update.message.reply_text("❌ You cannot buy your own offer!", parse_mode='HTML')
+        return
+
+    card = user_cards_db.get(code)
+    if not card or card.get("owner_id") != seller_id:
+        active_card_offers.pop(offer_id, None)
+        await update.message.reply_text("❌ Card is no longer in seller's roster!", parse_mode='HTML')
+        return
+
+    buyer_eco = get_user_economy(user.id)
+    if buyer_eco["spirit_stones"] < price:
+        await update.message.reply_text(
+            f"❌ <b>Insufficient Spirit Stones!</b>\nPrice: <code>{price} SS</code> | Your Balance: <code>{buyer_eco['spirit_stones']} SS</code>",
+            parse_mode='HTML'
+        )
+        return
+
+    seller_eco = get_user_economy(seller_id)
+    buyer_eco["spirit_stones"] -= price
+    seller_eco["spirit_stones"] += price
+    save_user_economy(user_economy_db)
+
+    card["owner_id"] = user.id
+    save_user_cards(user_cards_db)
+    active_card_offers.pop(offer_id, None)
+
+    buyer_name = escape_html(user.first_name)
+    c_name = escape_html(card.get("name"))
+
+    await update.message.reply_text(
+        f"🎉 <b>CARD PURCHASE COMPLETED!</b>\n\n"
+        f"👤 <b>New Owner:</b> {buyer_name}\n"
+        f"🎴 <b>Card:</b> <b>{c_name}</b> (Code: <code>{code}</code>)\n"
+        f"💎 <b>Price Paid:</b> <code>{price} SS</code>",
+        parse_mode='HTML'
+    )
+
+async def swap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Swaps cards between users.
+    STRICT RULE: ONLY SAME TIER CARDS CAN BE SWAPPED!
+    Usage: /swap <your_card_code> <their_card_code>
+    """
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    clean_expired_cards()
+
+    args = context.args or []
+    if len(args) < 2:
+        await update.message.reply_text(
+            "⚠️ Usage: <code>/swap &lt;your_card_code&gt; &lt;their_card_code&gt;</code>\n"
+            "<i>Note: Card swapping is strictly allowed ONLY between cards of the SAME TIER!</i>",
+            parse_mode='HTML'
+        )
+        return
+
+    my_code = args[0].strip().upper()
+    their_code = args[1].strip().upper()
+
+    my_card = user_cards_db.get(my_code)
+    their_card = user_cards_db.get(their_code)
+
+    if not my_card or my_card.get("owner_id") != user.id:
+        await update.message.reply_text(f"❌ Your card code <code>{my_code}</code> was not found in your roster!", parse_mode='HTML')
+        return
+
+    if not their_card:
+        await update.message.reply_text(f"❌ Target card code <code>{their_code}</code> was not found!", parse_mode='HTML')
+        return
+
+    other_owner_id = their_card.get("owner_id")
+    if other_owner_id == user.id:
+        await update.message.reply_text("❌ Both cards belong to you! No need to swap.", parse_mode='HTML')
+        return
+
+    my_tier = my_card.get("tier", "").capitalize()
+    their_tier = their_card.get("tier", "").capitalize()
+
+    if my_tier.lower() != their_tier.lower():
+        await update.message.reply_text(
+            f"🚫 <b>SWAP DENIED! DIFFERENT TIERS DETECTED!</b>\n\n"
+            f"• Your Card (<code>{my_code}</code>): {TIER_EMOJIS.get(my_tier, my_tier)}\n"
+            f"• Their Card (<code>{their_code}</code>): {TIER_EMOJIS.get(their_tier, their_tier)}\n\n"
+            f"❌ <b>Rule:</b> You can ONLY swap cards that belong to the <b>SAME TIER</b>!",
+            parse_mode='HTML'
+        )
+        return
+
+    my_card["owner_id"] = other_owner_id
+    their_card["owner_id"] = user.id
+    save_user_cards(user_cards_db)
+
+    my_cname = escape_html(my_card.get("name"))
+    their_cname = escape_html(their_card.get("name"))
+    other_info = users_db.get(str(other_owner_id), {})
+    other_name = escape_html(other_info.get("first_name", f"User {other_owner_id}"))
+
+    await update.message.reply_text(
+        f"🔄 <b>SAME-TIER CARD SWAP COMPLETED!</b> 🎉\n\n"
+        f"✨ <b>Tier Matched:</b> {TIER_EMOJIS.get(my_tier, my_tier)}\n\n"
+        f"• You gave <b>{my_cname}</b> (<code>{my_code}</code>) to {other_name}\n"
+        f"• You received <b>{their_cname}</b> (<code>{their_code}</code>) in return!",
+        parse_mode='HTML'
+    )
+
+async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Claims a card dropped via 100-msg group drop."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    chat_id = update.message.chat.id
+    track_user_data(user)
+
+    dropped = active_drops.get(chat_id)
+    if not dropped:
+        await update.message.reply_text("ℹ️ No active card drop in this chat right now!", parse_mode='HTML')
+        return
+
+    active_drops.pop(chat_id, None)
+
+    claimed_card = create_card_instance(user.id, forced_tier=dropped["tier"])
+    claimed_card["name"] = dropped["name"]
+    claimed_card["photo"] = dropped["photo"]
+    save_user_cards(user_cards_db)
+
+    uname = escape_html(user.first_name)
+    cname = escape_html(claimed_card["name"])
+    tier_str = TIER_EMOJIS.get(claimed_card["tier"], claimed_card["tier"])
+    code = claimed_card["code"]
+
+    await update.message.reply_text(
+        f"🎉 <b>CARD RECRUITED BY {uname}!</b> 🏆\n\n"
+        f"⚔️ <b>Character:</b> <b>{cname}</b>\n"
+        f"✨ <b>Tier:</b> {tier_str}\n"
+        f"🔑 <b>Roster Code:</b> <code>{code}</code>\n\n"
+        f"💡 Check your cards anytime with <code>/mycards</code>!",
+        parse_mode='HTML'
+    )
+
 # ==================== COMMAND HANDLERS ====================
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Displays help menu with all available commands."""
@@ -707,23 +1636,32 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user_id = user.id if user else 0
 
     help_text = (
-        "🤖 <b>Sylvi AI Group Assistant &amp; Chat Bot - Help Menu</b>\n\n"
+        "🤖 <b>Sylvi AI &amp; Cultivation Card Bot - Help Menu</b>\n\n"
+        "🌌 <b>Cultivation Anime Card System:</b>\n"
+        "• <code>/summon</code> - Recruit a card (Mortal, Awakened, Transcendent, Celestial, Primordial).\n"
+        "• <code>/mycards</code> / <code>/roster</code> - View your owned cards and remaining stay limits.\n"
+        "• <code>/showcard &lt;code&gt;</code> - View card details and photo using its 4-digit code.\n"
+        "• <code>/daily</code> - Claim daily 500 Spirit Stones (SS) + 1 Bonus Mortal Card.\n"
+        "• <code>/pillshop</code> - View pills shop to extend stay duration.\n"
+        "• <code>/buypill &lt;pill&gt; [qty]</code> - Buy cultivation pills with Spirit Stones.\n"
+        "• <code>/inventory</code> - Check your Spirit Stones balance and pills stock.\n"
+        "• <code>/cultivate &lt;code&gt; &lt;pill&gt;</code> - Feed pills to cards to extend stay duration.\n"
+        "• <code>/offer &lt;code&gt; &lt;price_ss&gt;</code> - Sell card to another user for Spirit Stones.\n"
+        "• <code>/buyoffer &lt;offer_id&gt;</code> - Buy an offered card.\n"
+        "• <code>/swap &lt;your_code&gt; &lt;their_code&gt;</code> - Swap cards (strictly SAME TIER only!).\n"
+        "• <code>/claim</code> - Claim dropped cards (Drops automatically after 100 GC messages!).\n\n"
         "📌 <b>General Commands:</b>\n"
-        "• <code>/help</code> ya <code>/start</code> - Sabhi available commands ki list dekhein.\n"
-        "• <code>/statsgc</code> - Current group chat ki stats aur memory info dekhein.\n"
-        "• <code>/4words</code> - Start a 4-letter word guessing game (30 tries + hints!).\n"
-        "• <code>/4words stop</code> - End the active 4-letter word game.\n\n"
-        "🔥 <b>Bot Features &amp; Style:</b>\n"
-        "• <b>AI Name:</b> Bot ka naam <b>Sylvi</b> hai! Group mein message reply karke, <code>@username</code> mention karke, ya <b>Sylvi</b> bolkar sawaal poocho.\n"
-        "• <b>Normal Human Vibe:</b> Bot bilkul normal, friendly aur helpful insaan ki tarah Hinglish mein baat karta hai.\n"
-        "• <b>Unique Username Tagging:</b> Jab kisi ko tag karne bolenge, bot us user ke profile ka unique handle (<code>@username</code>) dhoond kar tag karega.\n"
-        "• <b>Automatic Reminders / Target Waiting Notes:</b> Agar aap kisi ke Name ya Username par message chhodenge (e.g. 'Rahul jab message kare usko bolna meeting 5 baje hai'), toh jaise hi target user GC mein message karega, bot use turant wo message bol dega!\n"
-        "• <b>Comprehensive User Data Sync:</b> Past chat history, replies, new joins se sabhi users ke Name aur Unique Handle database mein sync hotey hain.\n"
+        "• <code>/help</code> ya <code>/start</code> - Help menu dekhein.\n"
+        "• <code>/statsgc</code> - Group chat stats &amp; memory info dekhein.\n"
+        "• <code>/4words</code> - 4-letter word guessing game (30 tries + hints).\n\n"
+        "🔥 <b>AI Assistant Features:</b>\n"
+        "• <b>AI Name:</b> Bot ka naam <b>Sylvi</b> hai! Reply karke, <code>@username</code> mention karke, ya <b>Sylvi</b> bolkar baat karein.\n"
     )
 
     if is_owner(user_id):
         help_text += (
             "\n👑 <b>Owner Special Commands:</b>\n"
+            "• <code>/addcard &lt;tier&gt; &lt;name&gt;</code> - Add new character card to pool (with photo).\n"
             "• <code>/addapi &lt;key&gt;</code> - Dynamic Nayi Groq API key add karein.\n"
             "• <code>/listapi</code> - Sabhi active Groq API keys ka status dekhein.\n"
             "• <code>/allusers</code> - Total collected users database stats dekhein.\n"
@@ -1085,7 +2023,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         user_id = user.id if user else 0
         user_is_owner = is_owner(user_id)
         role_label = " (Owner)" if user_is_owner else ""
-        logger.info(f"Private DM message received from {sender_name} ({user_id}){role_label}: {user_text[:30]}...")
+
+        bot_username = context.bot.username if context.bot else ""
+        is_direct_bot_reply = False
+        is_bot_mentioned = False
+        is_name_called = False
+
+        if message.reply_to_message and message.reply_to_message.from_user:
+            if context.bot and message.reply_to_message.from_user.id == context.bot.id:
+                is_direct_bot_reply = True
+
+        if bot_username and f"@{bot_username.lower()}" in user_text.lower():
+            is_bot_mentioned = True
+
+        if re.search(r'\bsylvi\b', user_text, re.IGNORECASE):
+            is_name_called = True
+
+        should_reply = is_direct_bot_reply or is_bot_mentioned or is_name_called
+
+        if not should_reply:
+            logger.info(f"Skipping DM message from {sender_name} ({user_id}) - 'Sylvi' not called/mentioned.")
+            return
+
+        logger.info(f"Processing DM message from {sender_name} ({user_id}){role_label} (Sylvi called): {user_text[:30]}...")
 
         owner_context = " Aap apne Owner ke saath baat kar rahe ho." if user_is_owner else ""
         messages_payload = [
@@ -1107,6 +2067,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # ==================== GROUP CHAT HANDLING ====================
     if chat_type in ['group', 'supergroup']:
         chat_id = message.chat.id
+
+        # 100-MESSAGE AUTOMATIC CULTIVATION CARD DROP TRIGGER
+        group_message_counts[chat_id] = group_message_counts.get(chat_id, 0) + 1
+        if group_message_counts[chat_id] >= 100:
+            group_message_counts[chat_id] = 0
+            dropped_tier = roll_card_tier()
+            matching_pool = [c for c in cards_pool_db if c.get("tier", "").lower() == dropped_tier.lower()]
+            c_name = random.choice(matching_pool)["name"] if matching_pool else f"{dropped_tier} Cultivator"
+            c_photo = random.choice(matching_pool).get("photo", "") if matching_pool else ""
+            active_drops[chat_id] = {"name": c_name, "tier": dropped_tier, "photo": c_photo}
+            tier_str = TIER_EMOJIS.get(dropped_tier, dropped_tier)
+
+            drop_msg = (
+                f"🌌 <b>CULTIVATION ANIME CARD DROPPED!</b> 🎴\n\n"
+                f"⚔️ <b>Character:</b> <b>{escape_html(c_name)}</b>\n"
+                f"✨ <b>Tier:</b> {tier_str}\n\n"
+                f"👉 <b>Type <code>/claim</code> to claim this card to your roster!</b>"
+            )
+            if c_photo:
+                try:
+                    await message.reply_photo(photo=c_photo, caption=drop_msg, parse_mode='HTML')
+                except Exception:
+                    await message.reply_text(drop_msg, parse_mode='HTML')
+            else:
+                await message.reply_text(drop_msg, parse_mode='HTML')
 
         # 1. CHECK & DELIVER ANY PENDING REMINDERS FOR THIS USER (TARGET WAITING NOTES)
         pending_notes = check_and_get_pending_reminders(chat_id, user)
@@ -1266,6 +2251,24 @@ def main():
     app.add_handler(CommandHandler("mongoexport", mongoexport_command))
     app.add_handler(CommandHandler("mongoimport", mongoimport_command))
     app.add_handler(CommandHandler("4words", fourwords_command))
+
+    # Cultivation Anime Card Command Handlers
+    app.add_handler(CommandHandler("summon", summon_command))
+    app.add_handler(CommandHandler("mycards", mycards_command))
+    app.add_handler(CommandHandler("roster", mycards_command))
+    app.add_handler(CommandHandler("showcard", showcard_command))
+    app.add_handler(CommandHandler("daily", daily_command))
+    app.add_handler(CommandHandler("pillshop", pillshop_command))
+    app.add_handler(CommandHandler("buypill", buypill_command))
+    app.add_handler(CommandHandler("inventory", inventory_command))
+    app.add_handler(CommandHandler("cultivate", cultivate_command))
+    app.add_handler(CommandHandler("addcard", addcard_command))
+    app.add_handler(CommandHandler("offer", offer_command))
+    app.add_handler(CommandHandler("buyoffer", buyoffer_command))
+    app.add_handler(CommandHandler("swap", swap_command))
+    app.add_handler(CommandHandler("claim", claim_command))
+    app.add_handler(CommandHandler("recruit", claim_command))
+    app.add_handler(CommandHandler("grab", claim_command))
 
     # Member Join Event Handler
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members_handler))
