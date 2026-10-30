@@ -40,15 +40,26 @@
             transform: translateY(4px);
             box-shadow: 0 2px 0 #3b0764, 0 5px 10px rgba(0, 0, 0, 0.4);
         }
-        .btn-emerald-3d {
-            background: linear-gradient(135deg, #059669 0%, #0d9488 100%);
-            box-shadow: 0 6px 0 #064e3b, 0 10px 20px rgba(0, 0, 0, 0.4);
+        .btn-yellow-3d {
+            background: linear-gradient(135deg, #f59e0b 0%, #eab308 100%);
+            box-shadow: 0 6px 0 #b45309, 0 10px 20px rgba(0, 0, 0, 0.4);
+            transform: translateY(0);
+            transition: all 0.1s ease;
+            color: #111827;
+        }
+        .btn-yellow-3d:active {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0 #b45309, 0 5px 10px rgba(0, 0, 0, 0.4);
+        }
+        .btn-green-3d {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            box-shadow: 0 6px 0 #047857, 0 10px 20px rgba(0, 0, 0, 0.4);
             transform: translateY(0);
             transition: all 0.1s ease;
         }
-        .btn-emerald-3d:active {
+        .btn-green-3d:active {
             transform: translateY(4px);
-            box-shadow: 0 2px 0 #064e3b, 0 5px 10px rgba(0, 0, 0, 0.4);
+            box-shadow: 0 2px 0 #047857, 0 5px 10px rgba(0, 0, 0, 0.4);
         }
         .tile-3d {
             background: linear-gradient(135deg, #334155 0%, #1e293b 100%);
@@ -182,7 +193,7 @@
                         <label class="block text-[11px] text-slate-300 font-bold mb-1">Mines Count (1 - 24)</label>
                         <input type="number" id="mine-count" value="3" min="1" max="24" class="w-full bg-slate-950/90 border border-slate-700 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-purple-500 shadow-inner">
                     </div>
-                    <button onclick="startMinesGame()" class="w-full btn-emerald-300 font-bold py-3.5 rounded-xl text-sm tracking-wide text-white shadow-xl">
+                    <button onclick="startMinesGame()" class="w-full btn-yellow-300 font-extrabold py-3.5 rounded-xl text-sm tracking-wide shadow-xl">
                         🚀 Start Mines Game
                     </button>
                 </div>
@@ -431,14 +442,14 @@
             const controlsEl = document.getElementById('mines-controls');
             if (activeMines.game_over) {
                 controlsEl.innerHTML = `
-                    <button onclick="resetMinesSetup()" class="w-full btn-3d font-bold py-3.5 rounded-2xl text-xs text-white tracking-wide shadow-xl">
+                    <button onclick="resetMinesSetup()" class="w-full btn-yellow-300 font-extrabold py-3.5 rounded-2xl text-xs tracking-wide shadow-xl">
                         🔄 Play Again (Change Bet / Mines)
                     </button>
                 `;
             } else if (activeMines.tiles_opened > 0) {
                 controlsEl.innerHTML = `
                     <div class="flex space-x-2.5">
-                        <button onclick="cashOutMines()" class="flex-1 btn-emerald-300 font-bold py-3 rounded-2xl text-xs text-white shadow-lg">
+                        <button onclick="cashOutMines()" class="flex-1 btn-green-300 font-bold py-3 rounded-2xl text-xs text-white shadow-lg">
                             💰 Cash Out (${activeMines.potential} SS)
                         </button>
                         <button onclick="surrenderMines()" class="px-5 bg-gradient-to-r from-rose-600 to-red-600 hover:opacity-90 font-bold py-3 rounded-2xl text-xs text-white shadow-lg">

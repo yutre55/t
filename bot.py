@@ -1078,6 +1078,52 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         parse_mode='HTML'
     )
 
+async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays the Spirit Stones economy leaderboard (top players)."""
+    message = update.effective_message
+    if not message:
+        return
+    user = update.effective_user
+    if user:
+        track_user_data(user)
+
+    if not user_economy_db:
+        await message.reply_text("🏆 <b>Leaderboard is currently empty!</b>", parse_mode='HTML')
+        return
+
+    sorted_econ = sorted(
+        user_economy_db.values(),
+        key=lambda x: x.get("spirit_stones", 0) if isinstance(x, dict) else 0,
+        reverse=True
+    )
+
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    lines = []
+
+    for idx, eco in enumerate(sorted_econ[:10]):
+        if not isinstance(eco, dict):
+            continue
+        uid = eco.get("user_id")
+        ss = eco.get("spirit_stones", 0)
+        u_info = users_db.get(str(uid), {})
+        uname = u_info.get("username")
+        fname = u_info.get("first_name") or f"Cultivator {uid}"
+
+        display_name = f"@{escape_html(str(uname))}" if uname else escape_html(str(fname))
+        medal = medals[idx] if idx < len(medals) else f"•"
+
+        lines.append(f"{medal} <b>{display_name}</b> — <code>{ss} SS</code> 💎")
+
+    lb_str = "\n".join(lines)
+
+    text = (
+        f"🏆 <b>CULTIVATION SPIRIT STONES LEADERBOARD</b> 💎\n\n"
+        f"{lb_str}\n\n"
+        f"<i>💡 Earn more Spirit Stones via /daily, /summon, or betting in /mine!</i>"
+    )
+
+    await message.reply_text(text, parse_mode='HTML')
+
 async def summon_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Summons a random card drop in group chat with tier probabilities."""
     if not update.message or not update.message.from_user:
@@ -1429,6 +1475,52 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         reply_markup=keyboard,
         parse_mode='HTML'
     )
+
+async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays the Spirit Stones economy leaderboard (top players)."""
+    message = update.effective_message
+    if not message:
+        return
+    user = update.effective_user
+    if user:
+        track_user_data(user)
+
+    if not user_economy_db:
+        await message.reply_text("🏆 <b>Leaderboard is currently empty!</b>", parse_mode='HTML')
+        return
+
+    sorted_econ = sorted(
+        user_economy_db.values(),
+        key=lambda x: x.get("spirit_stones", 0) if isinstance(x, dict) else 0,
+        reverse=True
+    )
+
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    lines = []
+
+    for idx, eco in enumerate(sorted_econ[:10]):
+        if not isinstance(eco, dict):
+            continue
+        uid = eco.get("user_id")
+        ss = eco.get("spirit_stones", 0)
+        u_info = users_db.get(str(uid), {})
+        uname = u_info.get("username")
+        fname = u_info.get("first_name") or f"Cultivator {uid}"
+
+        display_name = f"@{escape_html(str(uname))}" if uname else escape_html(str(fname))
+        medal = medals[idx] if idx < len(medals) else f"•"
+
+        lines.append(f"{medal} <b>{display_name}</b> — <code>{ss} SS</code> 💎")
+
+    lb_str = "\n".join(lines)
+
+    text = (
+        f"🏆 <b>CULTIVATION SPIRIT STONES LEADERBOARD</b> 💎\n\n"
+        f"{lb_str}\n\n"
+        f"<i>💡 Earn more Spirit Stones via /daily, /summon, or betting in /mine!</i>"
+    )
+
+    await message.reply_text(text, parse_mode='HTML')
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Searches for a card by name using /search <name>, shows selection if multiple match, and displays card image with details and owner count."""
@@ -2102,6 +2194,52 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         parse_mode='HTML'
     )
 
+async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays the Spirit Stones economy leaderboard (top players)."""
+    message = update.effective_message
+    if not message:
+        return
+    user = update.effective_user
+    if user:
+        track_user_data(user)
+
+    if not user_economy_db:
+        await message.reply_text("🏆 <b>Leaderboard is currently empty!</b>", parse_mode='HTML')
+        return
+
+    sorted_econ = sorted(
+        user_economy_db.values(),
+        key=lambda x: x.get("spirit_stones", 0) if isinstance(x, dict) else 0,
+        reverse=True
+    )
+
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    lines = []
+
+    for idx, eco in enumerate(sorted_econ[:10]):
+        if not isinstance(eco, dict):
+            continue
+        uid = eco.get("user_id")
+        ss = eco.get("spirit_stones", 0)
+        u_info = users_db.get(str(uid), {})
+        uname = u_info.get("username")
+        fname = u_info.get("first_name") or f"Cultivator {uid}"
+
+        display_name = f"@{escape_html(str(uname))}" if uname else escape_html(str(fname))
+        medal = medals[idx] if idx < len(medals) else f"•"
+
+        lines.append(f"{medal} <b>{display_name}</b> — <code>{ss} SS</code> 💎")
+
+    lb_str = "\n".join(lines)
+
+    text = (
+        f"🏆 <b>CULTIVATION SPIRIT STONES LEADERBOARD</b> 💎\n\n"
+        f"{lb_str}\n\n"
+        f"<i>💡 Earn more Spirit Stones via /daily, /summon, or betting in /mine!</i>"
+    )
+
+    await message.reply_text(text, parse_mode='HTML')
+
 async def cultivate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Feeds pill to card to extend stay duration or make permanent, with inline selection."""
     if not update.message or not update.message.from_user:
@@ -2272,6 +2410,52 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         reply_markup=keyboard,
         parse_mode='HTML'
     )
+
+async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays the Spirit Stones economy leaderboard (top players)."""
+    message = update.effective_message
+    if not message:
+        return
+    user = update.effective_user
+    if user:
+        track_user_data(user)
+
+    if not user_economy_db:
+        await message.reply_text("🏆 <b>Leaderboard is currently empty!</b>", parse_mode='HTML')
+        return
+
+    sorted_econ = sorted(
+        user_economy_db.values(),
+        key=lambda x: x.get("spirit_stones", 0) if isinstance(x, dict) else 0,
+        reverse=True
+    )
+
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    lines = []
+
+    for idx, eco in enumerate(sorted_econ[:10]):
+        if not isinstance(eco, dict):
+            continue
+        uid = eco.get("user_id")
+        ss = eco.get("spirit_stones", 0)
+        u_info = users_db.get(str(uid), {})
+        uname = u_info.get("username")
+        fname = u_info.get("first_name") or f"Cultivator {uid}"
+
+        display_name = f"@{escape_html(str(uname))}" if uname else escape_html(str(fname))
+        medal = medals[idx] if idx < len(medals) else f"•"
+
+        lines.append(f"{medal} <b>{display_name}</b> — <code>{ss} SS</code> 💎")
+
+    lb_str = "\n".join(lines)
+
+    text = (
+        f"🏆 <b>CULTIVATION SPIRIT STONES LEADERBOARD</b> 💎\n\n"
+        f"{lb_str}\n\n"
+        f"<i>💡 Earn more Spirit Stones via /daily, /summon, or betting in /mine!</i>"
+    )
+
+    await message.reply_text(text, parse_mode='HTML')
 
 async def addcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Owner command to add a new character card using interactive wizard or direct args."""
@@ -2876,6 +3060,52 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         parse_mode='HTML'
     )
 
+async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays the Spirit Stones economy leaderboard (top players)."""
+    message = update.effective_message
+    if not message:
+        return
+    user = update.effective_user
+    if user:
+        track_user_data(user)
+
+    if not user_economy_db:
+        await message.reply_text("🏆 <b>Leaderboard is currently empty!</b>", parse_mode='HTML')
+        return
+
+    sorted_econ = sorted(
+        user_economy_db.values(),
+        key=lambda x: x.get("spirit_stones", 0) if isinstance(x, dict) else 0,
+        reverse=True
+    )
+
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    lines = []
+
+    for idx, eco in enumerate(sorted_econ[:10]):
+        if not isinstance(eco, dict):
+            continue
+        uid = eco.get("user_id")
+        ss = eco.get("spirit_stones", 0)
+        u_info = users_db.get(str(uid), {})
+        uname = u_info.get("username")
+        fname = u_info.get("first_name") or f"Cultivator {uid}"
+
+        display_name = f"@{escape_html(str(uname))}" if uname else escape_html(str(fname))
+        medal = medals[idx] if idx < len(medals) else f"•"
+
+        lines.append(f"{medal} <b>{display_name}</b> — <code>{ss} SS</code> 💎")
+
+    lb_str = "\n".join(lines)
+
+    text = (
+        f"🏆 <b>CULTIVATION SPIRIT STONES LEADERBOARD</b> 💎\n\n"
+        f"{lb_str}\n\n"
+        f"<i>💡 Earn more Spirit Stones via /daily, /summon, or betting in /mine!</i>"
+    )
+
+    await message.reply_text(text, parse_mode='HTML')
+
 async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Claims a card dropped via /summon or 100-msg group drop."""
     if not update.message or not update.message.from_user:
@@ -3450,6 +3680,52 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         parse_mode='HTML'
     )
 
+async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays the Spirit Stones economy leaderboard (top players)."""
+    message = update.effective_message
+    if not message:
+        return
+    user = update.effective_user
+    if user:
+        track_user_data(user)
+
+    if not user_economy_db:
+        await message.reply_text("🏆 <b>Leaderboard is currently empty!</b>", parse_mode='HTML')
+        return
+
+    sorted_econ = sorted(
+        user_economy_db.values(),
+        key=lambda x: x.get("spirit_stones", 0) if isinstance(x, dict) else 0,
+        reverse=True
+    )
+
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    lines = []
+
+    for idx, eco in enumerate(sorted_econ[:10]):
+        if not isinstance(eco, dict):
+            continue
+        uid = eco.get("user_id")
+        ss = eco.get("spirit_stones", 0)
+        u_info = users_db.get(str(uid), {})
+        uname = u_info.get("username")
+        fname = u_info.get("first_name") or f"Cultivator {uid}"
+
+        display_name = f"@{escape_html(str(uname))}" if uname else escape_html(str(fname))
+        medal = medals[idx] if idx < len(medals) else f"•"
+
+        lines.append(f"{medal} <b>{display_name}</b> — <code>{ss} SS</code> 💎")
+
+    lb_str = "\n".join(lines)
+
+    text = (
+        f"🏆 <b>CULTIVATION SPIRIT STONES LEADERBOARD</b> 💎\n\n"
+        f"{lb_str}\n\n"
+        f"<i>💡 Earn more Spirit Stones via /daily, /summon, or betting in /mine!</i>"
+    )
+
+    await message.reply_text(text, parse_mode='HTML')
+
 BOT_COMMANDS_KNOWLEDGE = """
 [Bot Features & Commands Reference Manual for Sylvi]:
 1. Cultivation Anime Card System:
@@ -3469,6 +3745,7 @@ BOT_COMMANDS_KNOWLEDGE = """
    • /buyoffer <offer_id> - Offer ki gayi card ko buy karne ke liye.
    • /swap <my_code> <their_code> - Same tier ki cards ko aapas mein swap karne ke liye.
    • /myprofile, /profile - Apna game completion %, unique cards collected, aur tier progress profile dekhne ke liye.
+   • /leaderboard, /lb - Sabse zyada Spirit Stones (SS) wale top players ka leaderboard dekhne ke liye.
    • /app - Telegram Mini App open karne ke liye interactive web app button.
    • /mine <bet_ss> <mines_count> - Spirit Stones bet karke Mines betting game khelne ke liye (min bet 50 SS).
 2. General & Game Commands:
@@ -4099,6 +4376,8 @@ def main():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("app", app_command))
+    app.add_handler(CommandHandler("leaderboard", leaderboard_command))
+    app.add_handler(CommandHandler("lb", leaderboard_command))
     app.add_handler(CommandHandler("addapi", addapi_command))
     app.add_handler(CommandHandler("listapi", listapi_command))
     app.add_handler(CommandHandler("statsgc", statsgc_command))
