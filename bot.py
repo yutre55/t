@@ -1030,6 +1030,7 @@ async def welcome_new_members_handler(update: Update, context: ContextTypes.DEFA
     chat_id = update.message.chat.id
     joined_count = len(update.message.new_chat_members)
     group_memory.record_new_joins(chat_id, joined_count)
+    send_telegram_log(f"👤 {joined_count} new member(s) joined group <code>{chat_id}</code>.")
 
     for member in update.message.new_chat_members:
         track_user_data(member)
@@ -1133,6 +1134,7 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         chat_id = message.chat.id
         LOGS_GC_ID = chat_id
         save_logs_gc_id(chat_id)
+        send_telegram_log(f"✅ Activity logs group set to this chat ID: <code>{chat_id}</code> by owner.")
         await message.reply_text(
             f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
             f"This chat (ID: <code>{chat_id}</code>) will now receive all real-time bot user activity logs.",
@@ -1144,6 +1146,7 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         target_id = int(args[0].strip())
         LOGS_GC_ID = target_id
         save_logs_gc_id(target_id)
+        send_telegram_log(f"✅ Activity logs group set to chat ID: <code>{target_id}</code> by owner.")
         await message.reply_text(
             f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
             f"Target Chat ID: <code>{target_id}</code> will now receive all real-time bot user activity logs.",
@@ -1254,6 +1257,8 @@ async def summon_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     else:
         c_name = f"{dropped_tier} Cultivator"
         c_photo = ""
+
+    send_telegram_log(f"🎴 Card Summoned in chat <code>{chat_id}</code> by {user.first_name} (@{user.username or 'none'}): <b>{c_name}</b> [{dropped_tier}]")
 
     active_drops[chat_id] = {
         "name": c_name,
@@ -1566,6 +1571,7 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         chat_id = message.chat.id
         LOGS_GC_ID = chat_id
         save_logs_gc_id(chat_id)
+        send_telegram_log(f"✅ Activity logs group set to this chat ID: <code>{chat_id}</code> by owner.")
         await message.reply_text(
             f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
             f"This chat (ID: <code>{chat_id}</code>) will now receive all real-time bot user activity logs.",
@@ -1577,6 +1583,7 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         target_id = int(args[0].strip())
         LOGS_GC_ID = target_id
         save_logs_gc_id(target_id)
+        send_telegram_log(f"✅ Activity logs group set to chat ID: <code>{target_id}</code> by owner.")
         await message.reply_text(
             f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
             f"Target Chat ID: <code>{target_id}</code> will now receive all real-time bot user activity logs.",
@@ -1807,6 +1814,7 @@ async def daily_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     save_user_economy(user_economy_db)
 
     mortal_card = create_card_instance(user.id, forced_tier="Mortal")
+    send_telegram_log(f"💎 Daily claimed by {user.first_name} (ID: <code>{user.id}</code>): +500 SS & Mortal card ({mortal_card['name']})")
     uname = escape_html(user.first_name)
     c_name = escape_html(mortal_card["name"])
     code = mortal_card["code"]
@@ -2319,6 +2327,7 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         chat_id = message.chat.id
         LOGS_GC_ID = chat_id
         save_logs_gc_id(chat_id)
+        send_telegram_log(f"✅ Activity logs group set to this chat ID: <code>{chat_id}</code> by owner.")
         await message.reply_text(
             f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
             f"This chat (ID: <code>{chat_id}</code>) will now receive all real-time bot user activity logs.",
@@ -2330,6 +2339,7 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         target_id = int(args[0].strip())
         LOGS_GC_ID = target_id
         save_logs_gc_id(target_id)
+        send_telegram_log(f"✅ Activity logs group set to chat ID: <code>{target_id}</code> by owner.")
         await message.reply_text(
             f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
             f"Target Chat ID: <code>{target_id}</code> will now receive all real-time bot user activity logs.",
@@ -2510,6 +2520,7 @@ async def finalize_add_card(update: Update, user_id: int, tier: str, char_name: 
 
     cards_pool_db.append(new_base_card)
     save_cards_pool(cards_pool_db)
+    send_telegram_log(f"➕ New Card Added to Pool by owner: <b>{char_name}</b> [{tier}] (ID: <code>{card_id}</code>)")
 
     tier_emoji = TIER_EMOJIS.get(tier, tier)
 
@@ -2571,6 +2582,7 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         chat_id = message.chat.id
         LOGS_GC_ID = chat_id
         save_logs_gc_id(chat_id)
+        send_telegram_log(f"✅ Activity logs group set to this chat ID: <code>{chat_id}</code> by owner.")
         await message.reply_text(
             f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
             f"This chat (ID: <code>{chat_id}</code>) will now receive all real-time bot user activity logs.",
@@ -2582,6 +2594,7 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         target_id = int(args[0].strip())
         LOGS_GC_ID = target_id
         save_logs_gc_id(target_id)
+        send_telegram_log(f"✅ Activity logs group set to chat ID: <code>{target_id}</code> by owner.")
         await message.reply_text(
             f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
             f"Target Chat ID: <code>{target_id}</code> will now receive all real-time bot user activity logs.",
@@ -3255,6 +3268,7 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         chat_id = message.chat.id
         LOGS_GC_ID = chat_id
         save_logs_gc_id(chat_id)
+        send_telegram_log(f"✅ Activity logs group set to this chat ID: <code>{chat_id}</code> by owner.")
         await message.reply_text(
             f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
             f"This chat (ID: <code>{chat_id}</code>) will now receive all real-time bot user activity logs.",
@@ -3266,6 +3280,7 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         target_id = int(args[0].strip())
         LOGS_GC_ID = target_id
         save_logs_gc_id(target_id)
+        send_telegram_log(f"✅ Activity logs group set to chat ID: <code>{target_id}</code> by owner.")
         await message.reply_text(
             f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
             f"Target Chat ID: <code>{target_id}</code> will now receive all real-time bot user activity logs.",
@@ -3910,6 +3925,7 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         chat_id = message.chat.id
         LOGS_GC_ID = chat_id
         save_logs_gc_id(chat_id)
+        send_telegram_log(f"✅ Activity logs group set to this chat ID: <code>{chat_id}</code> by owner.")
         await message.reply_text(
             f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
             f"This chat (ID: <code>{chat_id}</code>) will now receive all real-time bot user activity logs.",
@@ -3921,6 +3937,7 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         target_id = int(args[0].strip())
         LOGS_GC_ID = target_id
         save_logs_gc_id(target_id)
+        send_telegram_log(f"✅ Activity logs group set to chat ID: <code>{target_id}</code> by owner.")
         await message.reply_text(
             f"✅ <b>Activity Logs Group Set Successfully!</b>\n"
             f"Target Chat ID: <code>{target_id}</code> will now receive all real-time bot user activity logs.",
@@ -4039,7 +4056,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await finalize_add_card(update, user.id, tier, char_name, photo)
             return
 
-    if user_text.lower().strip() in ["/app", "app", "miniapp", "/miniapp"] or (context.bot and context.bot.username and user_text.lower().strip() == f"/app@{context.bot.username.lower()}"):
+    base_text = user_text.lower().strip().split('@')[0]
+    bot_uname = context.bot.username.lower() if (context.bot and context.bot.username) else ""
+    is_app_cmd = base_text in ["/app", "app", "miniapp", "/miniapp", "/webapp", "webapp"]
+    if bot_uname and user_text.lower().strip() == f"/app@{bot_uname}":
+        is_app_cmd = True
+
+    if is_app_cmd:
         await app_command(update, context)
         return
 
