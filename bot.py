@@ -1137,7 +1137,7 @@ async def summon_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text(text)
 
 async def mycards_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Lists user's active cards and remaining stay limits."""
+    """Lists user's active cards grouped and sorted by tier (Primordial down to Mortal)."""
     if not update.message or not update.message.from_user:
         return
 
@@ -1156,19 +1156,37 @@ async def mycards_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return
 
-    tier_order = {"Primordial": 5, "Celestial": 4, "Transcendent": 3, "Awakened": 2, "Mortal": 1}
-    user_cards.sort(key=lambda x: tier_order.get(x.get("tier", "Mortal"), 0), reverse=True)
+    tiered_cards: Dict[str, List[Dict]] = {
+        "Primordial": [],
+        "Celestial": [],
+        "Transcendent": [],
+        "Awakened": [],
+        "Mortal": []
+    }
 
-    lines = []
-    for c in user_cards[:25]:
-        code = c.get("code")
-        c_name = escape_html(c.get("name", "Hero"))
-        tier_str = TIER_EMOJIS.get(c.get("tier"), c.get("tier"))
-        worth = get_card_worth(c)
-        t_left = format_time_left(c)
-        lines.append(f"• <code>{code}</code> | {tier_str} | <b>{c_name}</b> ({worth} SS, {t_left})")
+    for c in user_cards:
+        t = c.get("tier", "Mortal").capitalize()
+        if t in tiered_cards:
+            tiered_cards[t].append(c)
+        else:
+            tiered_cards.setdefault("Mortal", []).append(c)
 
-    cards_str = "\n".join(lines)
+    sections = []
+    for tier_name in ["Primordial", "Celestial", "Transcendent", "Awakened", "Mortal"]:
+        c_list = tiered_cards[tier_name]
+        if not c_list:
+            continue
+        emoji = TIER_EMOJIS.get(tier_name, tier_name)
+        lines = [f"<b>{emoji} ({len(c_list)}):</b>"]
+        for card in c_list:
+            code = card.get("code")
+            c_name = escape_html(card.get("name", "Hero"))
+            worth = get_card_worth(card)
+            t_left = format_time_left(card)
+            lines.append(f"  • <code>{code}</code> | <b>{c_name}</b> ({worth} SS, {t_left})")
+        sections.append("\n".join(lines))
+
+    cards_str = "\n\n".join(sections)
     total_count = len(user_cards)
 
     await update.message.reply_text(
@@ -1179,7 +1197,7 @@ async def mycards_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
 
 async def showcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Displays details of a specific card by 4-digit code."""
+    """Displays details of a specific card by 4-digit code (Name, Tier, Worth, Stay Time - no code)."""
     if not update.message:
         return
 
@@ -1196,10 +1214,6 @@ async def showcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text(f"❌ Card code <code>{code}</code> not found or has expired from roster!", parse_mode='HTML')
         return
 
-    owner_id = card.get("owner_id")
-    owner_info = users_db.get(str(owner_id), {})
-    owner_name = escape_html(owner_info.get("first_name", f"User {owner_id}"))
-
     c_name = escape_html(card.get("name", "Cultivator"))
     tier_name = card.get("tier", "Mortal")
     tier_emoji = TIER_EMOJIS.get(tier_name, tier_name)
@@ -1208,9 +1222,8 @@ async def showcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     text = (
         f"⚔️ <b>Name:</b> {c_name}\n"
-        f"🔑 <b>Code:</b> <code>{code}</code>\n"
-        f"💎 <b>Worth:</b> <code>{worth} SS</code>\n"
         f"✨ <b>Tier:</b> {tier_emoji}\n"
+        f"💎 <b>Worth:</b> <code>{worth} SS</code>\n"
         f"⏳ <b>Stay Time in Crew:</b> <code>{stay_time}</code>"
     )
 
