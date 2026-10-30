@@ -31,6 +31,7 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN") or "yahan_botfather_wala_token"
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 GROUP_LINK = "https://t.me/+CnibVehEsoNiNTdl"
+BOT_START_TIME = time.time()
 
 def escape_html(text: str) -> str:
     """Safely escapes HTML special characters for Telegram HTML parse_mode."""
@@ -997,6 +998,62 @@ async def welcome_new_members_handler(update: Update, context: ContextTypes.DEFA
 
 # ==================== CULTIVATION CARD COMMANDS ====================
 
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays bot operational status, system health, owner info, and game statistics."""
+    if not update.message:
+        return
+
+    user = update.message.from_user
+    if user:
+        track_user_data(user)
+
+    # Calculate uptime
+    uptime_seconds = int(time.time() - BOT_START_TIME)
+    days = uptime_seconds // 86400
+    hours = (uptime_seconds % 86400) // 3600
+    mins = (uptime_seconds % 3600) // 60
+    secs = uptime_seconds % 60
+
+    uptime_str = f"{secs}s"
+    if days > 0:
+        uptime_str = f"{days}d {hours}h {mins}m {secs}s"
+    elif hours > 0:
+        uptime_str = f"{hours}h {mins}m {secs}s"
+    elif mins > 0:
+        uptime_str = f"{mins}m {secs}s"
+
+    # Database status check
+    db = get_mongo_db()
+    db_status = "🟢 Connected (MongoDB Atlas)" if db is not None else "🟡 Local JSON Storage (Fallback)"
+
+    # Owner info
+    owner_str = f"<code>{OWNER_ID}</code>" if OWNER_ID != 0 else "Not Set ⚠️"
+
+    # Stats
+    total_users = len(users_db)
+    pool_cards = len(cards_pool_db)
+    claimed_cards = len(user_cards_db)
+    active_offers_count = len(active_card_offers)
+    active_drops_count = len(active_drops)
+    keys_count = len(GROQ_KEYS)
+
+    text = (
+        f"🤖 <b>SYLVI BOT STATUS & SYSTEM HEALTH</b> 🟢\n\n"
+        f"⏱️ <b>Uptime:</b> <code>{uptime_str}</code>\n"
+        f"👑 <b>Owner ID:</b> {owner_str}\n"
+        f"💾 <b>Database:</b> {db_status}\n"
+        f"🔑 <b>Groq API Keys Loaded:</b> <code>{keys_count} keys</code>\n\n"
+        f"📊 <b>Game & Economy Statistics:</b>\n"
+        f"• Total Tracked Users: <code>{total_users}</code>\n"
+        f"• Global Card Pool: <code>{pool_cards} cards</code>\n"
+        f"• Claimed Cards in Roster: <code>{claimed_cards} cards</code>\n"
+        f"• Active Market Offers: <code>{active_offers_count}</code>\n"
+        f"• Active World Drops: <code>{active_drops_count} chats</code>\n\n"
+        f"✨ <i>All systems operational! Use <code>/help</code> for available commands.</i>"
+    )
+
+    await update.message.reply_text(text, parse_mode='HTML')
+
 async def summon_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Summons a random card drop in group chat with tier probabilities."""
     if not update.message or not update.message.from_user:
@@ -1336,6 +1393,63 @@ async def inventory_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         f"💡 Type <code>/pillshop</code> to buy more pills!",
         parse_mode='HTML'
     )
+
+async def myprofile_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays user's cultivation game profile, Spirit Stones, roster count, unique cards collected, and completion %."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    clean_expired_cards()
+    eco = get_user_economy(user.id)
+    uname = escape_html(user.first_name)
+    ss_bal = eco["spirit_stones"]
+
+    user_cards = [c for c in user_cards_db.values() if c.get("owner_id") == user.id]
+    total_roster_cards = len(user_cards)
+
+    total_pool_count = len(cards_pool_db)
+    owned_card_names = {c.get("name", "").strip().lower() for c in user_cards}
+    unique_owned_count = 0
+    if total_pool_count > 0:
+        unique_owned_count = sum(1 for b in cards_pool_db if b.get("name", "").strip().lower() in owned_card_names)
+    else:
+        unique_owned_count = len(owned_card_names)
+
+    completion_pct = (unique_owned_count / total_pool_count * 100) if total_pool_count > 0 else 0.0
+
+    filled_blocks = int(completion_pct // 10)
+    filled_blocks = max(0, min(10, filled_blocks))
+    progress_bar = "█" * filled_blocks + "░" * (10 - filled_blocks)
+
+    tiers = ["Mortal", "Awakened", "Transcendent", "Celestial", "Primordial"]
+    tier_lines = []
+    for tier in tiers:
+        pool_tier_cards = [b for b in cards_pool_db if b.get("tier", "").lower() == tier.lower()]
+        pool_tier_count = len(pool_tier_cards)
+
+        owned_tier_names = {c.get("name", "").strip().lower() for c in user_cards if c.get("tier", "").lower() == tier.lower()}
+        owned_tier_count = sum(1 for b in pool_tier_cards if b.get("name", "").strip().lower() in owned_tier_names) if pool_tier_count > 0 else len(owned_tier_names)
+
+        symbol = TIER_SYMBOLS.get(tier, "⚪️")
+        tier_lines.append(f"• {symbol} {tier}: <code>{owned_tier_count}/{pool_tier_count}</code>")
+
+    tier_str = "\n".join(tier_lines)
+
+    text = (
+        f"📊 <b>CULTIVATOR GAME STATUS: {uname}</b>\n\n"
+        f"💎 <b>Spirit Stones (SS):</b> <code>{ss_bal} SS</code>\n"
+        f"🎴 <b>Roster Cards Owned:</b> <code>{total_roster_cards} cards</code>\n"
+        f"🎯 <b>Unique Cards Collected:</b> <code>{unique_owned_count}/{total_pool_count} base cards</code>\n"
+        f"🏆 <b>Game Completion:</b> <b>{completion_pct:.1f}%</b>\n"
+        f"[{progress_bar}]\n\n"
+        f"🏷️ <b>Collection Progress by Tier:</b>\n"
+        f"{tier_str}\n\n"
+        f"💡 <i>Tip: Recruited cards increase your completion %! When new cards are added to the pool, completion % adjusts automatically.</i>"
+    )
+
+    await update.message.reply_text(text, parse_mode='HTML')
 
 async def cultivate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Feeds pill to card to extend stay duration or make permanent, with inline selection."""
@@ -2920,6 +3034,7 @@ def main():
     # Public & Owner Command Handlers
     app.add_handler(CommandHandler("start", help_command))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("addapi", addapi_command))
     app.add_handler(CommandHandler("listapi", listapi_command))
     app.add_handler(CommandHandler("statsgc", statsgc_command))
@@ -2941,6 +3056,8 @@ def main():
     app.add_handler(CommandHandler("buypill", buypill_command))
     app.add_handler(CommandHandler("buy", buypill_command))
     app.add_handler(CommandHandler("inventory", inventory_command))
+    app.add_handler(CommandHandler("myprofile", myprofile_command))
+    app.add_handler(CommandHandler("profile", myprofile_command))
     app.add_handler(CommandHandler("cultivate", cultivate_command))
     app.add_handler(CommandHandler("addcard", addcard_command))
     app.add_handler(CommandHandler("offer", offer_command))
