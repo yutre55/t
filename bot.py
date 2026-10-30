@@ -1136,65 +1136,131 @@ async def summon_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     await update.message.reply_text(text)
 
-async def mycards_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Lists user's active cards grouped and sorted by tier (Primordial down to Mortal)."""
-    if not update.message or not update.message.from_user:
-        return
-
-    user = update.message.from_user
-    track_user_data(user)
+def get_user_roster_view(user_id: int, page: int = 0, tier_filter: str = "All", time_filter: str = "all") -> Tuple[str, Optional[InlineKeyboardMarkup]]:
     clean_expired_cards()
-
-    user_cards = [c for c in user_cards_db.values() if c.get("owner_id") == user.id]
-    uname = escape_html(user.first_name)
+    user_cards = [c for c in user_cards_db.values() if c.get("owner_id") == user_id]
 
     if not user_cards:
-        await update.message.reply_text(
-            f"📜 <b>{uname}'s Roster is Empty!</b>\n\n"
-            f"Type <code>/summon</code> in a group chat or <code>/daily</code> to recruit your first cultivation card!",
-            parse_mode='HTML'
-        )
-        return
+        return "📜 <b>Your Roster is Empty!</b>\n\nType <code>/summon</code> in a group chat or <code>/daily</code> to recruit cards!", None
 
-    tiered_cards: Dict[str, List[Dict]] = {
-        "Primordial": [],
-        "Celestial": [],
-        "Transcendent": [],
-        "Awakened": [],
-        "Mortal": []
-    }
-
+    filtered_cards = []
+    now = time.time()
     for c in user_cards:
         t = c.get("tier", "Mortal").capitalize()
-        if t in tiered_cards:
-            tiered_cards[t].append(c)
-        else:
-            tiered_cards.setdefault("Mortal", []).append(c)
-
-    sections = []
-    for tier_name in ["Primordial", "Celestial", "Transcendent", "Awakened", "Mortal"]:
-        c_list = tiered_cards[tier_name]
-        if not c_list:
+        if tier_filter != "All" and t.lower() != tier_filter.lower():
             continue
-        emoji = TIER_EMOJIS.get(tier_name, tier_name)
-        lines = [f"<b>{emoji} ({len(c_list)}):</b>"]
-        for card in c_list:
-            code = card.get("code")
-            c_name = escape_html(card.get("name", "Hero"))
-            worth = get_card_worth(card)
-            t_left = format_time_left(card)
-            lines.append(f"  • <code>{code}</code> | <b>{c_name}</b> ({worth} SS, {t_left})")
-        sections.append("\n".join(lines))
+        if time_filter == "24h":
+            if c.get("is_permanent", False):
+                continue
+            diff = c.get("expire_at", 0) - now
+            if diff <= 0 or diff > 24 * 3600:
+                continue
+        filtered_cards.append(c)
 
-    cards_str = "\n\n".join(sections)
-    total_count = len(user_cards)
+    tier_order = {"Primordial": 5, "Celestial": 4, "Transcendent": 3, "Awakened": 2, "Mortal": 1}
+    filtered_cards.sort(key=lambda x: (tier_order.get(x.get("tier", "Mortal"), 0), x.get("expire_at", 0)), reverse=True)
 
-    await update.message.reply_text(
-        f"📜 <b>{uname}'s Cultivation Roster ({total_count} Cards):</b>\n\n"
+    ITEMS_PER_PAGE = 8
+    total_cards = len(filtered_cards)
+    total_pages = max(1, (total_cards + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+
+    page_cards = filtered_cards[page * ITEMS_PER_PAGE : (page + 1) * ITEMS_PER_PAGE]
+
+    lines = []
+    for c in page_cards:
+        code = c.get("code")
+        c_name = escape_html(c.get("name", "Hero"))
+        tier_str = TIER_EMOJIS.get(c.get("tier"), c.get("tier"))
+        worth = get_card_worth(c)
+        t_left = format_time_left(c)
+        lines.append(f"• <code>{code}</code> | {tier_str} | <b>{c_name}</b> ({worth} SS, {t_left})")
+
+    cards_str = "\n".join(lines) if lines else "<i>No cards match current filter.</i>"
+
+    filter_info = f" | Filter: <b>{tier_filter}</b>" if tier_filter != "All" else ""
+    if time_filter == "24h":
+        filter_info += " | ⏱️ Expiring < 24h"
+
+    text = (
+        f"📜 <b>Your Cultivation Roster</b> (Page {page+1}/{total_pages} | Total: {total_cards}{filter_info}):\n\n"
         f"{cards_str}\n\n"
-        f"💡 Use <code>/showcard &lt;code&gt;</code> to view details or <code>/cultivate &lt;code&gt; &lt;pill&gt;</code> to feed pills!",
-        parse_mode='HTML'
+        f"💡 Use <code>/showcard &lt;code&gt;</code> to view details."
     )
+
+    keyboard_rows = []
+
+    # Navigation row
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"mycards_p_{page-1}_{tier_filter}_{time_filter}"))
+    nav_buttons.append(InlineKeyboardButton(f"📄 {page+1}/{total_pages}", callback_data="mycards_noop"))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"mycards_p_{page+1}_{tier_filter}_{time_filter}"))
+    keyboard_rows.append(nav_buttons)
+
+    # Filter Tiers row 1
+    keyboard_rows.append([
+        InlineKeyboardButton("🌐 All", callback_data=f"mycards_p_0_All_{time_filter}"),
+        InlineKeyboardButton("⚪ Mortal", callback_data=f"mycards_p_0_Mortal_{time_filter}"),
+        InlineKeyboardButton("🟢 Awakened", callback_data=f"mycards_p_0_Awakened_{time_filter}")
+    ])
+    # Filter Tiers row 2
+    keyboard_rows.append([
+        InlineKeyboardButton("🔵 Transcendent", callback_data=f"mycards_p_0_Transcendent_{time_filter}"),
+        InlineKeyboardButton("🟣 Celestial", callback_data=f"mycards_p_0_Celestial_{time_filter}"),
+        InlineKeyboardButton("🔥 Primordial", callback_data=f"mycards_p_0_Primordial_{time_filter}")
+    ])
+
+    # Time filter row
+    time_label = "⏱️ Show All Time" if time_filter == "24h" else "⏱️ Filter < 24h Expiring"
+    next_time_filter = "all" if time_filter == "24h" else "24h"
+    keyboard_rows.append([
+        InlineKeyboardButton(time_label, callback_data=f"mycards_p_0_{tier_filter}_{next_time_filter}")
+    ])
+
+    return text, InlineKeyboardMarkup(keyboard_rows)
+
+async def mycards_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Lists user's active cards with pagination and filter buttons."""
+    if not update.message or not update.message.from_user:
+        return
+    user = update.message.from_user
+    track_user_data(user)
+    text, keyboard = get_user_roster_view(user.id, page=0, tier_filter="All", time_filter="all")
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
+
+async def mycards_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.from_user:
+        return
+
+    user = query.from_user
+    user_id = user.id
+    data = query.data or ""
+
+    if data == "mycards_noop":
+        await query.answer("Current page", show_alert=False)
+        return
+
+    if data.startswith("mycards_p_"):
+        parts = data.split("_")
+        if len(parts) >= 5:
+            try:
+                page = int(parts[2])
+                tier_filter = parts[3]
+                time_filter = parts[4]
+            except ValueError:
+                page = 0
+                tier_filter = "All"
+                time_filter = "all"
+
+            text, keyboard = get_user_roster_view(user_id, page, tier_filter, time_filter)
+            try:
+                await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+            except Exception as e:
+                logger.warning(f"Could not update mycards message: {e}")
+            await query.answer()
 
 async def showcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Displays details of a specific card by 4-digit code (Name, Tier, Worth, Stay Time - no code)."""
@@ -3367,6 +3433,7 @@ def main():
     app.add_handler(CallbackQueryHandler(addcard_callback_handler, pattern="^addcard_"))
     app.add_handler(CallbackQueryHandler(pill_cultivate_callback_handler, pattern="^(buy_pill_|cult_|open_pillshop)"))
     app.add_handler(CallbackQueryHandler(mines_callback_handler, pattern="^mines_"))
+    app.add_handler(CallbackQueryHandler(mycards_callback_handler, pattern="^mycards_"))
 
     # Photo Messages Handler (For /addcard Wizard Photo Upload)
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
