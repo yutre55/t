@@ -1378,7 +1378,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
 async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles inline queries (@botusername <card_name>) to search global cards pool and show card images."""
+    """Handles inline queries (@botusername <card_name>) to search cards and show card images."""
     inline_query = update.inline_query
     if not inline_query:
         return
@@ -1389,22 +1389,32 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     results = []
-    matched_pool = []
+    seen_names = set()
+    all_cards = []
+
     for card in cards_pool_db:
-        c_name = card.get("name", "").lower()
-        if query_text in c_name:
-            matched_pool.append(card)
+        name = card.get("name", "").strip()
+        if name.lower() not in seen_names:
+            seen_names.add(name.lower())
+            all_cards.append(card)
 
-    default_card_image = "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=600&auto=format&fit=crop&q=60&ixlib=rb-4.0.3"
+    for card in user_cards_db.values():
+        name = card.get("name", "").strip()
+        if name.lower() not in seen_names:
+            seen_names.add(name.lower())
+            all_cards.append(card)
 
-    for card in matched_pool[:20]:
-        c_id = card.get("id", f"card_{random.randint(1000,9999)}")
+    matched_cards = [c for c in all_cards if query_text in c.get("name", "").lower()]
+    fallback_img = "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=600&auto=format&fit=crop&q=80"
+
+    for idx, card in enumerate(matched_cards[:20]):
+        c_id = card.get("id", card.get("code", f"card_{idx}"))
         c_name = card.get("name", "Cultivator")
         tier = card.get("tier", "Mortal")
         tier_emoji = TIER_EMOJIS.get(tier, tier)
         photo = card.get("photo", "")
 
-        photo_url = photo if (photo and (photo.startswith("http://") or photo.startswith("https://"))) else default_card_image
+        photo_url = photo if (photo and (photo.startswith("http://") or photo.startswith("https://"))) else fallback_img
 
         caption = (
             f"⚔️ <b>Name:</b> {escape_html(c_name)}\n"
@@ -1413,7 +1423,7 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
         results.append(
             InlineQueryResultPhoto(
-                id=c_id,
+                id=str(c_id),
                 photo_url=photo_url,
                 thumbnail_url=photo_url,
                 caption=caption,
@@ -1426,9 +1436,9 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             InlineQueryResultArticle(
                 id="no_result",
                 title="❌ No cards found",
-                description=f"No cards matching '{query_text}' found in global pool.",
+                description=f"No cards matching '{query_text}' found.",
                 input_message_content=InputTextMessageContent(
-                    f"❌ No cards matching '<b>{escape_html(query_text)}</b>' found in global card pool.",
+                    f"❌ No cards matching '<b>{escape_html(query_text)}</b>' found.",
                     parse_mode="HTML"
                 )
             )
