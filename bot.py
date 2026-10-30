@@ -1462,33 +1462,6 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await inline_query.answer(results, cache_time=5)
 
-        results.append(
-            InlineQueryResultArticle(
-                id=code,
-                title=title,
-                description=description,
-                input_message_content=InputTextMessageContent(
-                    content_text,
-                    parse_mode="HTML"
-                )
-            )
-        )
-
-    if not results and query_text:
-        results.append(
-            InlineQueryResultArticle(
-                id="no_result",
-                title="❌ No cards found",
-                description=f"No cards matching '{query_text}' found in any user roster.",
-                input_message_content=InputTextMessageContent(
-                    f"❌ No cards matching '<b>{escape_html(query_text)}</b>' found in any active user roster.",
-                    parse_mode="HTML"
-                )
-            )
-        )
-
-    await inline_query.answer(results, cache_time=5)
-
 async def daily_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Claims daily free 500 Spirit Stones (SS) + 1 Mortal Card."""
     if not update.message or not update.message.from_user:
