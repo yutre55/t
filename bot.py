@@ -11,7 +11,7 @@ import threading
 import urllib.request
 import math
 import pymongo
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import List, Dict, Set, Optional
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent, WebAppInfo
@@ -6044,6 +6044,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 web_active_mines: Dict[int, Dict] = {}  # user_id -> game_state for web mini app
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
     def do_GET(self):
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
@@ -6057,6 +6064,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                         content = f.read()
                     self.send_response(200)
                     self.send_header("Content-type", "text/html; charset=utf-8")
+                    self.send_header("Access-Control-Allow-Origin", "*")
                     self.end_headers()
                     self.wfile.write(content)
                     return
@@ -6315,7 +6323,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 def start_health_check_server():
     port = int(os.getenv("PORT", "8080"))
     try:
-        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+        server = ThreadingHTTPServer(("0.0.0.0", port), HealthCheckHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         logger.info(f"🌐 Health check HTTP server started on port {port}")
