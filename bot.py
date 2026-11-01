@@ -1161,7 +1161,7 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    web_app_url = "https://t-3-zb94.onrender.com"
+    web_app_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-xcem.onrender.com"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
@@ -1892,7 +1892,7 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    web_app_url = "https://t-3-zb94.onrender.com"
+    web_app_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-xcem.onrender.com"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
@@ -2919,7 +2919,7 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    web_app_url = "https://t-3-zb94.onrender.com"
+    web_app_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-xcem.onrender.com"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
@@ -3453,7 +3453,7 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    web_app_url = "https://t-3-zb94.onrender.com"
+    web_app_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-xcem.onrender.com"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
@@ -4412,7 +4412,7 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    web_app_url = "https://t-3-zb94.onrender.com"
+    web_app_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-xcem.onrender.com"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
@@ -5331,7 +5331,7 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    web_app_url = "https://t-3-zb94.onrender.com"
+    web_app_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-xcem.onrender.com"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
