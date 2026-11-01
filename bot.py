@@ -1161,8 +1161,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    base_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-3-zb94.onrender.com"
-    web_app_url = base_url.rstrip("/") + "/"
+    web_app_url = "https://t-3-zb94.onrender.com"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
@@ -1216,7 +1215,7 @@ def drop_token(board, col, token) -> int:
 def build_connect4_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     row_buttons = []
     for c in range(7):
-        row_buttons.append(InlineKeyboardButton(f"⬇️ {c+1}", callback_data=f"c4_col_{c}"))
+        row_buttons.append(InlineKeyboardButton(str(c+1), callback_data=f"c4_col_{c}"))
     return InlineKeyboardMarkup([row_buttons])
 
 def format_connect4_board(game: Dict) -> str:
@@ -1227,18 +1226,23 @@ def format_connect4_board(game: Dict) -> str:
     turn_name = p1 if game["current_turn"] == game["player1_id"] else p2
     turn_token = "🔴" if game["current_turn"] == game["player1_id"] else "🟡"
 
+    if game["player2_id"] == 0:
+        pot_info = "🎁 <b>Reward on Win:</b> <code>+100 SS</code> (Free Play vs Bot)"
+    else:
+        pot_info = f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)"
+
     return (
         f"🔴 <b>CONNECT 4 BATTLE</b> 🟡\n\n"
         f"👤 <b>Player 1 (🔴):</b> {p1}\n"
         f"👤 <b>Player 2 (🟡):</b> {p2}\n"
-        f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)\n\n"
+        f"{pot_info}\n\n"
         f"{board_str}\n\n"
         f"👉 <b>Turn:</b> {turn_token} <b>{escape_html(turn_name)}</b>\n"
         f"<i>Tap column numbers (1-7) below to drop your disk!</i>"
     )
 
 async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Starts a Connect 4 game vs Bot or another user with Spirit Stones bet."""
+    """Starts a Connect 4 game vs Bot (Free, +100 SS on win) or PvP against another user with SS bet."""
     if not update.message or not update.message.from_user:
         return
 
@@ -1247,27 +1251,9 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     chat_id = update.message.chat.id
 
     args = context.args or []
-    if not args or not args[0].isdigit():
-        await update.message.reply_text(
-            "⚠️ <b>Usage:</b> <code>/join4 &lt;bet_ss&gt;</code>\n"
-            "• Play vs Bot: Type <code>/join4 50</code>\n"
-            "• Play vs User: Reply to someone's message with <code>/join4 50</code>",
-            parse_mode='HTML'
-        )
-        return
-
-    bet = int(args[0])
-    if bet < 10:
-        await update.message.reply_text("❌ Minimum bet for Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
-        return
-
-    eco1 = get_user_economy(user.id)
-    if eco1["spirit_stones"] < bet:
-        await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
-        return
-
     opponent_id = 0
     opponent_name = "Sylvi Bot 🤖"
+    bet = 0
 
     if update.message.reply_to_message and update.message.reply_to_message.from_user:
         opp_user = update.message.reply_to_message.from_user
@@ -1275,7 +1261,25 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await update.message.reply_text("❌ You cannot play against yourself!", parse_mode='HTML')
             return
         if opp_user.is_bot:
-            await update.message.reply_text("❌ You cannot challenge bots as a user opponent! (Play vs bot by not replying)", parse_mode='HTML')
+            await update.message.reply_text("❌ You cannot challenge bots as a user opponent!", parse_mode='HTML')
+            return
+
+        if not args or not args[0].isdigit():
+            await update.message.reply_text(
+                "⚠️ <b>Usage for PvP:</b> <code>/join4 &lt;bet_ss&gt;</code> (replying to opponent's message)\n"
+                "<i>Example:</i> <code>/join4 50</code>",
+                parse_mode='HTML'
+            )
+            return
+
+        bet = int(args[0])
+        if bet < 10:
+            await update.message.reply_text("❌ Minimum bet for PvP Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
+            return
+
+        eco1 = get_user_economy(user.id)
+        if eco1["spirit_stones"] < bet:
+            await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
             return
 
         eco2 = get_user_economy(opp_user.id)
@@ -1286,13 +1290,11 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         opponent_id = opp_user.id
         opponent_name = opp_user.first_name
 
-    eco1["spirit_stones"] -= bet
-    save_user_economy(user_economy_db)
-
-    if opponent_id != 0:
-        eco2 = get_user_economy(opponent_id)
+        eco1["spirit_stones"] -= bet
         eco2["spirit_stones"] -= bet
         save_user_economy(user_economy_db)
+    else:
+        bet = 0
 
     game_state = {
         "chat_id": chat_id,
@@ -1322,7 +1324,7 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
     game = active_connect4_games.get(chat_id)
     if not game or game["status"] != "active":
-        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4 <bet>.", show_alert=True)
+        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4.", show_alert=True)
         return
 
     if user.id != game["current_turn"]:
@@ -1345,39 +1347,54 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
         winner_id = user.id
         winner_name = user.first_name
-        pot = game["bet"] * 2
 
-        eco = get_user_economy(winner_id)
-        eco["spirit_stones"] += pot
-        save_user_economy(user_economy_db)
+        if game["player2_id"] == 0:
+            eco = get_user_economy(winner_id)
+            eco["spirit_stones"] += 100
+            save_user_economy(user_economy_db)
 
-        board_str = "\n".join([" ".join(r) for r in game["board"]])
-        text = (
-            f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
-            f"{board_str}\n\n"
-            f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
-            f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
-            f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
-        )
-        await query.edit_message_text(text, reply_markup=keyboard if False else None, parse_mode='HTML')
+            board_str = "\n".join([" ".join(r) for r in game["board"]])
+            text = (
+                f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                f"{board_str}\n\n"
+                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                f"💎 <b>Reward Received:</b> <code>+100 Spirit Stones (SS)</code> 💎\n\n"
+                f"<i>Type /join4 to play again!</i>"
+            )
+        else:
+            pot = game["bet"] * 2
+            eco = get_user_economy(winner_id)
+            eco["spirit_stones"] += pot
+            save_user_economy(user_economy_db)
+
+            board_str = "\n".join([" ".join(r) for r in game["board"]])
+            text = (
+                f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
+                f"{board_str}\n\n"
+                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
+                f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
+            )
+        await query.edit_message_text(text, parse_mode='HTML')
         return
 
     if is_board_full(game["board"]):
         game["status"] = "finished"
         active_connect4_games.pop(chat_id, None)
 
-        eco1 = get_user_economy(game["player1_id"])
-        eco1["spirit_stones"] += game["bet"]
         if game["player2_id"] != 0:
+            eco1 = get_user_economy(game["player1_id"])
+            eco1["spirit_stones"] += game["bet"]
             eco2 = get_user_economy(game["player2_id"])
             eco2["spirit_stones"] += game["bet"]
-        save_user_economy(user_economy_db)
+            save_user_economy(user_economy_db)
 
         board_str = "\n".join([" ".join(r) for r in game["board"]])
+        refund_str = f" Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!" if game["player2_id"] != 0 else ""
         text = (
             f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
             f"{board_str}\n\n"
-            f"<i>Board is full. Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!</i>"
+            f"<i>Board is full.{refund_str}</i>"
         )
         await query.edit_message_text(text, parse_mode='HTML')
         return
@@ -1890,8 +1907,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    base_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-3-zb94.onrender.com"
-    web_app_url = base_url.rstrip("/") + "/"
+    web_app_url = "https://t-3-zb94.onrender.com"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
@@ -1945,7 +1961,7 @@ def drop_token(board, col, token) -> int:
 def build_connect4_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     row_buttons = []
     for c in range(7):
-        row_buttons.append(InlineKeyboardButton(f"⬇️ {c+1}", callback_data=f"c4_col_{c}"))
+        row_buttons.append(InlineKeyboardButton(str(c+1), callback_data=f"c4_col_{c}"))
     return InlineKeyboardMarkup([row_buttons])
 
 def format_connect4_board(game: Dict) -> str:
@@ -1956,18 +1972,23 @@ def format_connect4_board(game: Dict) -> str:
     turn_name = p1 if game["current_turn"] == game["player1_id"] else p2
     turn_token = "🔴" if game["current_turn"] == game["player1_id"] else "🟡"
 
+    if game["player2_id"] == 0:
+        pot_info = "🎁 <b>Reward on Win:</b> <code>+100 SS</code> (Free Play vs Bot)"
+    else:
+        pot_info = f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)"
+
     return (
         f"🔴 <b>CONNECT 4 BATTLE</b> 🟡\n\n"
         f"👤 <b>Player 1 (🔴):</b> {p1}\n"
         f"👤 <b>Player 2 (🟡):</b> {p2}\n"
-        f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)\n\n"
+        f"{pot_info}\n\n"
         f"{board_str}\n\n"
         f"👉 <b>Turn:</b> {turn_token} <b>{escape_html(turn_name)}</b>\n"
         f"<i>Tap column numbers (1-7) below to drop your disk!</i>"
     )
 
 async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Starts a Connect 4 game vs Bot or another user with Spirit Stones bet."""
+    """Starts a Connect 4 game vs Bot (Free, +100 SS on win) or PvP against another user with SS bet."""
     if not update.message or not update.message.from_user:
         return
 
@@ -1976,27 +1997,9 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     chat_id = update.message.chat.id
 
     args = context.args or []
-    if not args or not args[0].isdigit():
-        await update.message.reply_text(
-            "⚠️ <b>Usage:</b> <code>/join4 &lt;bet_ss&gt;</code>\n"
-            "• Play vs Bot: Type <code>/join4 50</code>\n"
-            "• Play vs User: Reply to someone's message with <code>/join4 50</code>",
-            parse_mode='HTML'
-        )
-        return
-
-    bet = int(args[0])
-    if bet < 10:
-        await update.message.reply_text("❌ Minimum bet for Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
-        return
-
-    eco1 = get_user_economy(user.id)
-    if eco1["spirit_stones"] < bet:
-        await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
-        return
-
     opponent_id = 0
     opponent_name = "Sylvi Bot 🤖"
+    bet = 0
 
     if update.message.reply_to_message and update.message.reply_to_message.from_user:
         opp_user = update.message.reply_to_message.from_user
@@ -2004,7 +2007,25 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await update.message.reply_text("❌ You cannot play against yourself!", parse_mode='HTML')
             return
         if opp_user.is_bot:
-            await update.message.reply_text("❌ You cannot challenge bots as a user opponent! (Play vs bot by not replying)", parse_mode='HTML')
+            await update.message.reply_text("❌ You cannot challenge bots as a user opponent!", parse_mode='HTML')
+            return
+
+        if not args or not args[0].isdigit():
+            await update.message.reply_text(
+                "⚠️ <b>Usage for PvP:</b> <code>/join4 &lt;bet_ss&gt;</code> (replying to opponent's message)\n"
+                "<i>Example:</i> <code>/join4 50</code>",
+                parse_mode='HTML'
+            )
+            return
+
+        bet = int(args[0])
+        if bet < 10:
+            await update.message.reply_text("❌ Minimum bet for PvP Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
+            return
+
+        eco1 = get_user_economy(user.id)
+        if eco1["spirit_stones"] < bet:
+            await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
             return
 
         eco2 = get_user_economy(opp_user.id)
@@ -2015,13 +2036,11 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         opponent_id = opp_user.id
         opponent_name = opp_user.first_name
 
-    eco1["spirit_stones"] -= bet
-    save_user_economy(user_economy_db)
-
-    if opponent_id != 0:
-        eco2 = get_user_economy(opponent_id)
+        eco1["spirit_stones"] -= bet
         eco2["spirit_stones"] -= bet
         save_user_economy(user_economy_db)
+    else:
+        bet = 0
 
     game_state = {
         "chat_id": chat_id,
@@ -2051,7 +2070,7 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
     game = active_connect4_games.get(chat_id)
     if not game or game["status"] != "active":
-        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4 <bet>.", show_alert=True)
+        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4.", show_alert=True)
         return
 
     if user.id != game["current_turn"]:
@@ -2074,39 +2093,54 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
         winner_id = user.id
         winner_name = user.first_name
-        pot = game["bet"] * 2
 
-        eco = get_user_economy(winner_id)
-        eco["spirit_stones"] += pot
-        save_user_economy(user_economy_db)
+        if game["player2_id"] == 0:
+            eco = get_user_economy(winner_id)
+            eco["spirit_stones"] += 100
+            save_user_economy(user_economy_db)
 
-        board_str = "\n".join([" ".join(r) for r in game["board"]])
-        text = (
-            f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
-            f"{board_str}\n\n"
-            f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
-            f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
-            f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
-        )
-        await query.edit_message_text(text, reply_markup=keyboard if False else None, parse_mode='HTML')
+            board_str = "\n".join([" ".join(r) for r in game["board"]])
+            text = (
+                f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                f"{board_str}\n\n"
+                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                f"💎 <b>Reward Received:</b> <code>+100 Spirit Stones (SS)</code> 💎\n\n"
+                f"<i>Type /join4 to play again!</i>"
+            )
+        else:
+            pot = game["bet"] * 2
+            eco = get_user_economy(winner_id)
+            eco["spirit_stones"] += pot
+            save_user_economy(user_economy_db)
+
+            board_str = "\n".join([" ".join(r) for r in game["board"]])
+            text = (
+                f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
+                f"{board_str}\n\n"
+                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
+                f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
+            )
+        await query.edit_message_text(text, parse_mode='HTML')
         return
 
     if is_board_full(game["board"]):
         game["status"] = "finished"
         active_connect4_games.pop(chat_id, None)
 
-        eco1 = get_user_economy(game["player1_id"])
-        eco1["spirit_stones"] += game["bet"]
         if game["player2_id"] != 0:
+            eco1 = get_user_economy(game["player1_id"])
+            eco1["spirit_stones"] += game["bet"]
             eco2 = get_user_economy(game["player2_id"])
             eco2["spirit_stones"] += game["bet"]
-        save_user_economy(user_economy_db)
+            save_user_economy(user_economy_db)
 
         board_str = "\n".join([" ".join(r) for r in game["board"]])
+        refund_str = f" Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!" if game["player2_id"] != 0 else ""
         text = (
             f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
             f"{board_str}\n\n"
-            f"<i>Board is full. Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!</i>"
+            f"<i>Board is full.{refund_str}</i>"
         )
         await query.edit_message_text(text, parse_mode='HTML')
         return
@@ -2915,8 +2949,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    base_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-3-zb94.onrender.com"
-    web_app_url = base_url.rstrip("/") + "/"
+    web_app_url = "https://t-3-zb94.onrender.com"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
@@ -2970,7 +3003,7 @@ def drop_token(board, col, token) -> int:
 def build_connect4_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     row_buttons = []
     for c in range(7):
-        row_buttons.append(InlineKeyboardButton(f"⬇️ {c+1}", callback_data=f"c4_col_{c}"))
+        row_buttons.append(InlineKeyboardButton(str(c+1), callback_data=f"c4_col_{c}"))
     return InlineKeyboardMarkup([row_buttons])
 
 def format_connect4_board(game: Dict) -> str:
@@ -2981,18 +3014,23 @@ def format_connect4_board(game: Dict) -> str:
     turn_name = p1 if game["current_turn"] == game["player1_id"] else p2
     turn_token = "🔴" if game["current_turn"] == game["player1_id"] else "🟡"
 
+    if game["player2_id"] == 0:
+        pot_info = "🎁 <b>Reward on Win:</b> <code>+100 SS</code> (Free Play vs Bot)"
+    else:
+        pot_info = f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)"
+
     return (
         f"🔴 <b>CONNECT 4 BATTLE</b> 🟡\n\n"
         f"👤 <b>Player 1 (🔴):</b> {p1}\n"
         f"👤 <b>Player 2 (🟡):</b> {p2}\n"
-        f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)\n\n"
+        f"{pot_info}\n\n"
         f"{board_str}\n\n"
         f"👉 <b>Turn:</b> {turn_token} <b>{escape_html(turn_name)}</b>\n"
         f"<i>Tap column numbers (1-7) below to drop your disk!</i>"
     )
 
 async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Starts a Connect 4 game vs Bot or another user with Spirit Stones bet."""
+    """Starts a Connect 4 game vs Bot (Free, +100 SS on win) or PvP against another user with SS bet."""
     if not update.message or not update.message.from_user:
         return
 
@@ -3001,27 +3039,9 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     chat_id = update.message.chat.id
 
     args = context.args or []
-    if not args or not args[0].isdigit():
-        await update.message.reply_text(
-            "⚠️ <b>Usage:</b> <code>/join4 &lt;bet_ss&gt;</code>\n"
-            "• Play vs Bot: Type <code>/join4 50</code>\n"
-            "• Play vs User: Reply to someone's message with <code>/join4 50</code>",
-            parse_mode='HTML'
-        )
-        return
-
-    bet = int(args[0])
-    if bet < 10:
-        await update.message.reply_text("❌ Minimum bet for Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
-        return
-
-    eco1 = get_user_economy(user.id)
-    if eco1["spirit_stones"] < bet:
-        await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
-        return
-
     opponent_id = 0
     opponent_name = "Sylvi Bot 🤖"
+    bet = 0
 
     if update.message.reply_to_message and update.message.reply_to_message.from_user:
         opp_user = update.message.reply_to_message.from_user
@@ -3029,7 +3049,25 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await update.message.reply_text("❌ You cannot play against yourself!", parse_mode='HTML')
             return
         if opp_user.is_bot:
-            await update.message.reply_text("❌ You cannot challenge bots as a user opponent! (Play vs bot by not replying)", parse_mode='HTML')
+            await update.message.reply_text("❌ You cannot challenge bots as a user opponent!", parse_mode='HTML')
+            return
+
+        if not args or not args[0].isdigit():
+            await update.message.reply_text(
+                "⚠️ <b>Usage for PvP:</b> <code>/join4 &lt;bet_ss&gt;</code> (replying to opponent's message)\n"
+                "<i>Example:</i> <code>/join4 50</code>",
+                parse_mode='HTML'
+            )
+            return
+
+        bet = int(args[0])
+        if bet < 10:
+            await update.message.reply_text("❌ Minimum bet for PvP Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
+            return
+
+        eco1 = get_user_economy(user.id)
+        if eco1["spirit_stones"] < bet:
+            await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
             return
 
         eco2 = get_user_economy(opp_user.id)
@@ -3040,13 +3078,11 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         opponent_id = opp_user.id
         opponent_name = opp_user.first_name
 
-    eco1["spirit_stones"] -= bet
-    save_user_economy(user_economy_db)
-
-    if opponent_id != 0:
-        eco2 = get_user_economy(opponent_id)
+        eco1["spirit_stones"] -= bet
         eco2["spirit_stones"] -= bet
         save_user_economy(user_economy_db)
+    else:
+        bet = 0
 
     game_state = {
         "chat_id": chat_id,
@@ -3076,7 +3112,7 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
     game = active_connect4_games.get(chat_id)
     if not game or game["status"] != "active":
-        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4 <bet>.", show_alert=True)
+        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4.", show_alert=True)
         return
 
     if user.id != game["current_turn"]:
@@ -3099,39 +3135,54 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
         winner_id = user.id
         winner_name = user.first_name
-        pot = game["bet"] * 2
 
-        eco = get_user_economy(winner_id)
-        eco["spirit_stones"] += pot
-        save_user_economy(user_economy_db)
+        if game["player2_id"] == 0:
+            eco = get_user_economy(winner_id)
+            eco["spirit_stones"] += 100
+            save_user_economy(user_economy_db)
 
-        board_str = "\n".join([" ".join(r) for r in game["board"]])
-        text = (
-            f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
-            f"{board_str}\n\n"
-            f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
-            f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
-            f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
-        )
-        await query.edit_message_text(text, reply_markup=keyboard if False else None, parse_mode='HTML')
+            board_str = "\n".join([" ".join(r) for r in game["board"]])
+            text = (
+                f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                f"{board_str}\n\n"
+                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                f"💎 <b>Reward Received:</b> <code>+100 Spirit Stones (SS)</code> 💎\n\n"
+                f"<i>Type /join4 to play again!</i>"
+            )
+        else:
+            pot = game["bet"] * 2
+            eco = get_user_economy(winner_id)
+            eco["spirit_stones"] += pot
+            save_user_economy(user_economy_db)
+
+            board_str = "\n".join([" ".join(r) for r in game["board"]])
+            text = (
+                f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
+                f"{board_str}\n\n"
+                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
+                f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
+            )
+        await query.edit_message_text(text, parse_mode='HTML')
         return
 
     if is_board_full(game["board"]):
         game["status"] = "finished"
         active_connect4_games.pop(chat_id, None)
 
-        eco1 = get_user_economy(game["player1_id"])
-        eco1["spirit_stones"] += game["bet"]
         if game["player2_id"] != 0:
+            eco1 = get_user_economy(game["player1_id"])
+            eco1["spirit_stones"] += game["bet"]
             eco2 = get_user_economy(game["player2_id"])
             eco2["spirit_stones"] += game["bet"]
-        save_user_economy(user_economy_db)
+            save_user_economy(user_economy_db)
 
         board_str = "\n".join([" ".join(r) for r in game["board"]])
+        refund_str = f" Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!" if game["player2_id"] != 0 else ""
         text = (
             f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
             f"{board_str}\n\n"
-            f"<i>Board is full. Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!</i>"
+            f"<i>Board is full.{refund_str}</i>"
         )
         await query.edit_message_text(text, parse_mode='HTML')
         return
@@ -3447,8 +3498,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    base_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-3-zb94.onrender.com"
-    web_app_url = base_url.rstrip("/") + "/"
+    web_app_url = "https://t-3-zb94.onrender.com"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
@@ -3502,7 +3552,7 @@ def drop_token(board, col, token) -> int:
 def build_connect4_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     row_buttons = []
     for c in range(7):
-        row_buttons.append(InlineKeyboardButton(f"⬇️ {c+1}", callback_data=f"c4_col_{c}"))
+        row_buttons.append(InlineKeyboardButton(str(c+1), callback_data=f"c4_col_{c}"))
     return InlineKeyboardMarkup([row_buttons])
 
 def format_connect4_board(game: Dict) -> str:
@@ -3513,18 +3563,23 @@ def format_connect4_board(game: Dict) -> str:
     turn_name = p1 if game["current_turn"] == game["player1_id"] else p2
     turn_token = "🔴" if game["current_turn"] == game["player1_id"] else "🟡"
 
+    if game["player2_id"] == 0:
+        pot_info = "🎁 <b>Reward on Win:</b> <code>+100 SS</code> (Free Play vs Bot)"
+    else:
+        pot_info = f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)"
+
     return (
         f"🔴 <b>CONNECT 4 BATTLE</b> 🟡\n\n"
         f"👤 <b>Player 1 (🔴):</b> {p1}\n"
         f"👤 <b>Player 2 (🟡):</b> {p2}\n"
-        f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)\n\n"
+        f"{pot_info}\n\n"
         f"{board_str}\n\n"
         f"👉 <b>Turn:</b> {turn_token} <b>{escape_html(turn_name)}</b>\n"
         f"<i>Tap column numbers (1-7) below to drop your disk!</i>"
     )
 
 async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Starts a Connect 4 game vs Bot or another user with Spirit Stones bet."""
+    """Starts a Connect 4 game vs Bot (Free, +100 SS on win) or PvP against another user with SS bet."""
     if not update.message or not update.message.from_user:
         return
 
@@ -3533,27 +3588,9 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     chat_id = update.message.chat.id
 
     args = context.args or []
-    if not args or not args[0].isdigit():
-        await update.message.reply_text(
-            "⚠️ <b>Usage:</b> <code>/join4 &lt;bet_ss&gt;</code>\n"
-            "• Play vs Bot: Type <code>/join4 50</code>\n"
-            "• Play vs User: Reply to someone's message with <code>/join4 50</code>",
-            parse_mode='HTML'
-        )
-        return
-
-    bet = int(args[0])
-    if bet < 10:
-        await update.message.reply_text("❌ Minimum bet for Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
-        return
-
-    eco1 = get_user_economy(user.id)
-    if eco1["spirit_stones"] < bet:
-        await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
-        return
-
     opponent_id = 0
     opponent_name = "Sylvi Bot 🤖"
+    bet = 0
 
     if update.message.reply_to_message and update.message.reply_to_message.from_user:
         opp_user = update.message.reply_to_message.from_user
@@ -3561,7 +3598,25 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await update.message.reply_text("❌ You cannot play against yourself!", parse_mode='HTML')
             return
         if opp_user.is_bot:
-            await update.message.reply_text("❌ You cannot challenge bots as a user opponent! (Play vs bot by not replying)", parse_mode='HTML')
+            await update.message.reply_text("❌ You cannot challenge bots as a user opponent!", parse_mode='HTML')
+            return
+
+        if not args or not args[0].isdigit():
+            await update.message.reply_text(
+                "⚠️ <b>Usage for PvP:</b> <code>/join4 &lt;bet_ss&gt;</code> (replying to opponent's message)\n"
+                "<i>Example:</i> <code>/join4 50</code>",
+                parse_mode='HTML'
+            )
+            return
+
+        bet = int(args[0])
+        if bet < 10:
+            await update.message.reply_text("❌ Minimum bet for PvP Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
+            return
+
+        eco1 = get_user_economy(user.id)
+        if eco1["spirit_stones"] < bet:
+            await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
             return
 
         eco2 = get_user_economy(opp_user.id)
@@ -3572,13 +3627,11 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         opponent_id = opp_user.id
         opponent_name = opp_user.first_name
 
-    eco1["spirit_stones"] -= bet
-    save_user_economy(user_economy_db)
-
-    if opponent_id != 0:
-        eco2 = get_user_economy(opponent_id)
+        eco1["spirit_stones"] -= bet
         eco2["spirit_stones"] -= bet
         save_user_economy(user_economy_db)
+    else:
+        bet = 0
 
     game_state = {
         "chat_id": chat_id,
@@ -3608,7 +3661,7 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
     game = active_connect4_games.get(chat_id)
     if not game or game["status"] != "active":
-        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4 <bet>.", show_alert=True)
+        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4.", show_alert=True)
         return
 
     if user.id != game["current_turn"]:
@@ -3631,39 +3684,54 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
         winner_id = user.id
         winner_name = user.first_name
-        pot = game["bet"] * 2
 
-        eco = get_user_economy(winner_id)
-        eco["spirit_stones"] += pot
-        save_user_economy(user_economy_db)
+        if game["player2_id"] == 0:
+            eco = get_user_economy(winner_id)
+            eco["spirit_stones"] += 100
+            save_user_economy(user_economy_db)
 
-        board_str = "\n".join([" ".join(r) for r in game["board"]])
-        text = (
-            f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
-            f"{board_str}\n\n"
-            f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
-            f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
-            f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
-        )
-        await query.edit_message_text(text, reply_markup=keyboard if False else None, parse_mode='HTML')
+            board_str = "\n".join([" ".join(r) for r in game["board"]])
+            text = (
+                f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                f"{board_str}\n\n"
+                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                f"💎 <b>Reward Received:</b> <code>+100 Spirit Stones (SS)</code> 💎\n\n"
+                f"<i>Type /join4 to play again!</i>"
+            )
+        else:
+            pot = game["bet"] * 2
+            eco = get_user_economy(winner_id)
+            eco["spirit_stones"] += pot
+            save_user_economy(user_economy_db)
+
+            board_str = "\n".join([" ".join(r) for r in game["board"]])
+            text = (
+                f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
+                f"{board_str}\n\n"
+                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
+                f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
+            )
+        await query.edit_message_text(text, parse_mode='HTML')
         return
 
     if is_board_full(game["board"]):
         game["status"] = "finished"
         active_connect4_games.pop(chat_id, None)
 
-        eco1 = get_user_economy(game["player1_id"])
-        eco1["spirit_stones"] += game["bet"]
         if game["player2_id"] != 0:
+            eco1 = get_user_economy(game["player1_id"])
+            eco1["spirit_stones"] += game["bet"]
             eco2 = get_user_economy(game["player2_id"])
             eco2["spirit_stones"] += game["bet"]
-        save_user_economy(user_economy_db)
+            save_user_economy(user_economy_db)
 
         board_str = "\n".join([" ".join(r) for r in game["board"]])
+        refund_str = f" Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!" if game["player2_id"] != 0 else ""
         text = (
             f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
             f"{board_str}\n\n"
-            f"<i>Board is full. Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!</i>"
+            f"<i>Board is full.{refund_str}</i>"
         )
         await query.edit_message_text(text, parse_mode='HTML')
         return
@@ -4404,8 +4472,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    base_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-3-zb94.onrender.com"
-    web_app_url = base_url.rstrip("/") + "/"
+    web_app_url = "https://t-3-zb94.onrender.com"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
@@ -4459,7 +4526,7 @@ def drop_token(board, col, token) -> int:
 def build_connect4_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     row_buttons = []
     for c in range(7):
-        row_buttons.append(InlineKeyboardButton(f"⬇️ {c+1}", callback_data=f"c4_col_{c}"))
+        row_buttons.append(InlineKeyboardButton(str(c+1), callback_data=f"c4_col_{c}"))
     return InlineKeyboardMarkup([row_buttons])
 
 def format_connect4_board(game: Dict) -> str:
@@ -4470,18 +4537,23 @@ def format_connect4_board(game: Dict) -> str:
     turn_name = p1 if game["current_turn"] == game["player1_id"] else p2
     turn_token = "🔴" if game["current_turn"] == game["player1_id"] else "🟡"
 
+    if game["player2_id"] == 0:
+        pot_info = "🎁 <b>Reward on Win:</b> <code>+100 SS</code> (Free Play vs Bot)"
+    else:
+        pot_info = f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)"
+
     return (
         f"🔴 <b>CONNECT 4 BATTLE</b> 🟡\n\n"
         f"👤 <b>Player 1 (🔴):</b> {p1}\n"
         f"👤 <b>Player 2 (🟡):</b> {p2}\n"
-        f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)\n\n"
+        f"{pot_info}\n\n"
         f"{board_str}\n\n"
         f"👉 <b>Turn:</b> {turn_token} <b>{escape_html(turn_name)}</b>\n"
         f"<i>Tap column numbers (1-7) below to drop your disk!</i>"
     )
 
 async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Starts a Connect 4 game vs Bot or another user with Spirit Stones bet."""
+    """Starts a Connect 4 game vs Bot (Free, +100 SS on win) or PvP against another user with SS bet."""
     if not update.message or not update.message.from_user:
         return
 
@@ -4490,27 +4562,9 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     chat_id = update.message.chat.id
 
     args = context.args or []
-    if not args or not args[0].isdigit():
-        await update.message.reply_text(
-            "⚠️ <b>Usage:</b> <code>/join4 &lt;bet_ss&gt;</code>\n"
-            "• Play vs Bot: Type <code>/join4 50</code>\n"
-            "• Play vs User: Reply to someone's message with <code>/join4 50</code>",
-            parse_mode='HTML'
-        )
-        return
-
-    bet = int(args[0])
-    if bet < 10:
-        await update.message.reply_text("❌ Minimum bet for Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
-        return
-
-    eco1 = get_user_economy(user.id)
-    if eco1["spirit_stones"] < bet:
-        await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
-        return
-
     opponent_id = 0
     opponent_name = "Sylvi Bot 🤖"
+    bet = 0
 
     if update.message.reply_to_message and update.message.reply_to_message.from_user:
         opp_user = update.message.reply_to_message.from_user
@@ -4518,7 +4572,25 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await update.message.reply_text("❌ You cannot play against yourself!", parse_mode='HTML')
             return
         if opp_user.is_bot:
-            await update.message.reply_text("❌ You cannot challenge bots as a user opponent! (Play vs bot by not replying)", parse_mode='HTML')
+            await update.message.reply_text("❌ You cannot challenge bots as a user opponent!", parse_mode='HTML')
+            return
+
+        if not args or not args[0].isdigit():
+            await update.message.reply_text(
+                "⚠️ <b>Usage for PvP:</b> <code>/join4 &lt;bet_ss&gt;</code> (replying to opponent's message)\n"
+                "<i>Example:</i> <code>/join4 50</code>",
+                parse_mode='HTML'
+            )
+            return
+
+        bet = int(args[0])
+        if bet < 10:
+            await update.message.reply_text("❌ Minimum bet for PvP Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
+            return
+
+        eco1 = get_user_economy(user.id)
+        if eco1["spirit_stones"] < bet:
+            await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
             return
 
         eco2 = get_user_economy(opp_user.id)
@@ -4529,13 +4601,11 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         opponent_id = opp_user.id
         opponent_name = opp_user.first_name
 
-    eco1["spirit_stones"] -= bet
-    save_user_economy(user_economy_db)
-
-    if opponent_id != 0:
-        eco2 = get_user_economy(opponent_id)
+        eco1["spirit_stones"] -= bet
         eco2["spirit_stones"] -= bet
         save_user_economy(user_economy_db)
+    else:
+        bet = 0
 
     game_state = {
         "chat_id": chat_id,
@@ -4565,7 +4635,7 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
     game = active_connect4_games.get(chat_id)
     if not game or game["status"] != "active":
-        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4 <bet>.", show_alert=True)
+        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4.", show_alert=True)
         return
 
     if user.id != game["current_turn"]:
@@ -4588,39 +4658,54 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
         winner_id = user.id
         winner_name = user.first_name
-        pot = game["bet"] * 2
 
-        eco = get_user_economy(winner_id)
-        eco["spirit_stones"] += pot
-        save_user_economy(user_economy_db)
+        if game["player2_id"] == 0:
+            eco = get_user_economy(winner_id)
+            eco["spirit_stones"] += 100
+            save_user_economy(user_economy_db)
 
-        board_str = "\n".join([" ".join(r) for r in game["board"]])
-        text = (
-            f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
-            f"{board_str}\n\n"
-            f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
-            f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
-            f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
-        )
-        await query.edit_message_text(text, reply_markup=keyboard if False else None, parse_mode='HTML')
+            board_str = "\n".join([" ".join(r) for r in game["board"]])
+            text = (
+                f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                f"{board_str}\n\n"
+                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                f"💎 <b>Reward Received:</b> <code>+100 Spirit Stones (SS)</code> 💎\n\n"
+                f"<i>Type /join4 to play again!</i>"
+            )
+        else:
+            pot = game["bet"] * 2
+            eco = get_user_economy(winner_id)
+            eco["spirit_stones"] += pot
+            save_user_economy(user_economy_db)
+
+            board_str = "\n".join([" ".join(r) for r in game["board"]])
+            text = (
+                f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
+                f"{board_str}\n\n"
+                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
+                f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
+            )
+        await query.edit_message_text(text, parse_mode='HTML')
         return
 
     if is_board_full(game["board"]):
         game["status"] = "finished"
         active_connect4_games.pop(chat_id, None)
 
-        eco1 = get_user_economy(game["player1_id"])
-        eco1["spirit_stones"] += game["bet"]
         if game["player2_id"] != 0:
+            eco1 = get_user_economy(game["player1_id"])
+            eco1["spirit_stones"] += game["bet"]
             eco2 = get_user_economy(game["player2_id"])
             eco2["spirit_stones"] += game["bet"]
-        save_user_economy(user_economy_db)
+            save_user_economy(user_economy_db)
 
         board_str = "\n".join([" ".join(r) for r in game["board"]])
+        refund_str = f" Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!" if game["player2_id"] != 0 else ""
         text = (
             f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
             f"{board_str}\n\n"
-            f"<i>Board is full. Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!</i>"
+            f"<i>Board is full.{refund_str}</i>"
         )
         await query.edit_message_text(text, parse_mode='HTML')
         return
@@ -5321,8 +5406,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    base_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-3-zb94.onrender.com"
-    web_app_url = base_url.rstrip("/") + "/"
+    web_app_url = "https://t-3-zb94.onrender.com"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
@@ -5376,7 +5460,7 @@ def drop_token(board, col, token) -> int:
 def build_connect4_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     row_buttons = []
     for c in range(7):
-        row_buttons.append(InlineKeyboardButton(f"⬇️ {c+1}", callback_data=f"c4_col_{c}"))
+        row_buttons.append(InlineKeyboardButton(str(c+1), callback_data=f"c4_col_{c}"))
     return InlineKeyboardMarkup([row_buttons])
 
 def format_connect4_board(game: Dict) -> str:
@@ -5387,18 +5471,23 @@ def format_connect4_board(game: Dict) -> str:
     turn_name = p1 if game["current_turn"] == game["player1_id"] else p2
     turn_token = "🔴" if game["current_turn"] == game["player1_id"] else "🟡"
 
+    if game["player2_id"] == 0:
+        pot_info = "🎁 <b>Reward on Win:</b> <code>+100 SS</code> (Free Play vs Bot)"
+    else:
+        pot_info = f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)"
+
     return (
         f"🔴 <b>CONNECT 4 BATTLE</b> 🟡\n\n"
         f"👤 <b>Player 1 (🔴):</b> {p1}\n"
         f"👤 <b>Player 2 (🟡):</b> {p2}\n"
-        f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)\n\n"
+        f"{pot_info}\n\n"
         f"{board_str}\n\n"
         f"👉 <b>Turn:</b> {turn_token} <b>{escape_html(turn_name)}</b>\n"
         f"<i>Tap column numbers (1-7) below to drop your disk!</i>"
     )
 
 async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Starts a Connect 4 game vs Bot or another user with Spirit Stones bet."""
+    """Starts a Connect 4 game vs Bot (Free, +100 SS on win) or PvP against another user with SS bet."""
     if not update.message or not update.message.from_user:
         return
 
@@ -5407,27 +5496,9 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     chat_id = update.message.chat.id
 
     args = context.args or []
-    if not args or not args[0].isdigit():
-        await update.message.reply_text(
-            "⚠️ <b>Usage:</b> <code>/join4 &lt;bet_ss&gt;</code>\n"
-            "• Play vs Bot: Type <code>/join4 50</code>\n"
-            "• Play vs User: Reply to someone's message with <code>/join4 50</code>",
-            parse_mode='HTML'
-        )
-        return
-
-    bet = int(args[0])
-    if bet < 10:
-        await update.message.reply_text("❌ Minimum bet for Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
-        return
-
-    eco1 = get_user_economy(user.id)
-    if eco1["spirit_stones"] < bet:
-        await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
-        return
-
     opponent_id = 0
     opponent_name = "Sylvi Bot 🤖"
+    bet = 0
 
     if update.message.reply_to_message and update.message.reply_to_message.from_user:
         opp_user = update.message.reply_to_message.from_user
@@ -5435,7 +5506,25 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await update.message.reply_text("❌ You cannot play against yourself!", parse_mode='HTML')
             return
         if opp_user.is_bot:
-            await update.message.reply_text("❌ You cannot challenge bots as a user opponent! (Play vs bot by not replying)", parse_mode='HTML')
+            await update.message.reply_text("❌ You cannot challenge bots as a user opponent!", parse_mode='HTML')
+            return
+
+        if not args or not args[0].isdigit():
+            await update.message.reply_text(
+                "⚠️ <b>Usage for PvP:</b> <code>/join4 &lt;bet_ss&gt;</code> (replying to opponent's message)\n"
+                "<i>Example:</i> <code>/join4 50</code>",
+                parse_mode='HTML'
+            )
+            return
+
+        bet = int(args[0])
+        if bet < 10:
+            await update.message.reply_text("❌ Minimum bet for PvP Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
+            return
+
+        eco1 = get_user_economy(user.id)
+        if eco1["spirit_stones"] < bet:
+            await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
             return
 
         eco2 = get_user_economy(opp_user.id)
@@ -5446,13 +5535,11 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         opponent_id = opp_user.id
         opponent_name = opp_user.first_name
 
-    eco1["spirit_stones"] -= bet
-    save_user_economy(user_economy_db)
-
-    if opponent_id != 0:
-        eco2 = get_user_economy(opponent_id)
+        eco1["spirit_stones"] -= bet
         eco2["spirit_stones"] -= bet
         save_user_economy(user_economy_db)
+    else:
+        bet = 0
 
     game_state = {
         "chat_id": chat_id,
@@ -5482,7 +5569,7 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
     game = active_connect4_games.get(chat_id)
     if not game or game["status"] != "active":
-        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4 <bet>.", show_alert=True)
+        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4.", show_alert=True)
         return
 
     if user.id != game["current_turn"]:
@@ -5505,39 +5592,54 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
         winner_id = user.id
         winner_name = user.first_name
-        pot = game["bet"] * 2
 
-        eco = get_user_economy(winner_id)
-        eco["spirit_stones"] += pot
-        save_user_economy(user_economy_db)
+        if game["player2_id"] == 0:
+            eco = get_user_economy(winner_id)
+            eco["spirit_stones"] += 100
+            save_user_economy(user_economy_db)
 
-        board_str = "\n".join([" ".join(r) for r in game["board"]])
-        text = (
-            f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
-            f"{board_str}\n\n"
-            f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
-            f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
-            f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
-        )
-        await query.edit_message_text(text, reply_markup=keyboard if False else None, parse_mode='HTML')
+            board_str = "\n".join([" ".join(r) for r in game["board"]])
+            text = (
+                f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                f"{board_str}\n\n"
+                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                f"💎 <b>Reward Received:</b> <code>+100 Spirit Stones (SS)</code> 💎\n\n"
+                f"<i>Type /join4 to play again!</i>"
+            )
+        else:
+            pot = game["bet"] * 2
+            eco = get_user_economy(winner_id)
+            eco["spirit_stones"] += pot
+            save_user_economy(user_economy_db)
+
+            board_str = "\n".join([" ".join(r) for r in game["board"]])
+            text = (
+                f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
+                f"{board_str}\n\n"
+                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
+                f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
+            )
+        await query.edit_message_text(text, parse_mode='HTML')
         return
 
     if is_board_full(game["board"]):
         game["status"] = "finished"
         active_connect4_games.pop(chat_id, None)
 
-        eco1 = get_user_economy(game["player1_id"])
-        eco1["spirit_stones"] += game["bet"]
         if game["player2_id"] != 0:
+            eco1 = get_user_economy(game["player1_id"])
+            eco1["spirit_stones"] += game["bet"]
             eco2 = get_user_economy(game["player2_id"])
             eco2["spirit_stones"] += game["bet"]
-        save_user_economy(user_economy_db)
+            save_user_economy(user_economy_db)
 
         board_str = "\n".join([" ".join(r) for r in game["board"]])
+        refund_str = f" Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!" if game["player2_id"] != 0 else ""
         text = (
             f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
             f"{board_str}\n\n"
-            f"<i>Board is full. Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!</i>"
+            f"<i>Board is full.{refund_str}</i>"
         )
         await query.edit_message_text(text, parse_mode='HTML')
         return
@@ -5753,8 +5855,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     base_text = user_text.lower().strip().split('@')[0]
     bot_uname = context.bot.username.lower() if (context.bot and context.bot.username) else ""
-    is_app_cmd = base_text in ["/app", "app", "miniapp", "/miniapp", "/webapp", "webapp"]
-    if bot_uname and user_text.lower().strip() == f"/app@{bot_uname}":
+    is_app_cmd = base_text in ["/miniapp", "miniapp", "/app", "app", "/webapp", "webapp"]
+    if bot_uname and user_text.lower().strip() in [f"/miniapp@{bot_uname}", f"/app@{bot_uname}"]:
         is_app_cmd = True
 
     if is_app_cmd:
@@ -6344,7 +6446,7 @@ def main():
     app.add_handler(CommandHandler("start", help_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("status", status_command))
-    app.add_handler(CommandHandler(["app", "miniapp", "webapp"], app_command))
+    app.add_handler(CommandHandler(["miniapp", "app", "webapp"], app_command))
     app.add_handler(CommandHandler("leaderboard", leaderboard_command))
     app.add_handler(CommandHandler("lb", leaderboard_command))
     app.add_handler(CommandHandler("logsgc", logsgc_command))
