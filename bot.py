@@ -6437,10 +6437,22 @@ def start_health_check_server():
     except Exception as e:
         logger.warning(f"Could not start health check HTTP server: {e}")
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log the error and send a telegram message to notify about the error."""
+    logger.error(msg="Exception while handling an update:", exc_info=context.error)
+    try:
+        err_str = str(context.error)
+        send_telegram_log(f"❌ <b>BOT EXCEPTION ERROR</b>\n<pre>{escape_html(err_str)}</pre>")
+    except Exception:
+        pass
+
 def main():
     logger.info("Starting Sylvi Groq AI Telegram Bot (Owner DM + Dynamic API Keys Active)...")
     start_health_check_server()
     app = Application.builder().token(TELEGRAM_TOKEN).build()
+
+    # Register error handler
+    app.add_error_handler(error_handler)
 
     # Public & Owner Command Handlers
     app.add_handler(CommandHandler("start", help_command))
