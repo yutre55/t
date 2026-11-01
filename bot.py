@@ -1670,8 +1670,11 @@ def get_user_roster_view(user_id: int, page: int = 0, tier_filter: str = "All", 
     clean_expired_cards()
     user_cards = [c for c in user_cards_db.values() if c.get("owner_id") == user_id]
 
+    u_info = users_db.get(str(user_id), {})
+    uname = escape_html(u_info.get("first_name", "User"))
+
     if not user_cards:
-        return "📜 <b>Your Roster is Empty!</b>\n\nType <code>/summon</code> in a group chat or <code>/daily</code> to recruit cards!", None
+        return f"📜 <b>{uname}'s crew is empty!</b>\n\nType <code>/summon</code> in a group chat or <code>/daily</code> to recruit cards!", None
 
     filtered_cards = []
     now = time.time()
@@ -1705,51 +1708,78 @@ def get_user_roster_view(user_id: int, page: int = 0, tier_filter: str = "All", 
 
     page_cards = filtered_cards[page * ITEMS_PER_PAGE : (page + 1) * ITEMS_PER_PAGE]
 
-    lines = []
+    card_counts = {}
+    for c in user_cards:
+        cname_key = c.get("name", "").strip().lower()
+        card_counts[cname_key] = card_counts.get(cname_key, 0) + 1
+
+    tiered_page_cards: Dict[str, List[Dict]] = {}
     for c in page_cards:
-        code = c.get("code")
-        c_name = escape_html(c.get("name", "Hero"))
-        tier_str = TIER_EMOJIS.get(c.get("tier"), c.get("tier"))
-        worth = get_card_worth(c)
-        t_left = format_time_left(c)
-        lines.append(f"• <code>{code}</code> | {tier_str} | <b>{c_name}</b> ({worth} SS, {t_left})")
+        t_name = c.get("tier", "Mortal").capitalize()
+        if t_name not in tiered_page_cards:
+            tiered_page_cards[t_name] = []
+        tiered_page_cards[t_name].append(c)
 
-    cards_str = "\n".join(lines) if lines else "<i>No cards match current filter.</i>"
+    tier_emblems = {
+        "Primordial": "💠",
+        "Celestial": "🔮",
+        "Transcendent": "🔵",
+        "Awakened": "🟢",
+        "Mortal": "⚪"
+    }
 
-    filter_info = f" | Tier: <b>{tier_filter}</b>" if tier_filter != "All" else ""
+    tier_sections = []
+    for t_name in ["Primordial", "Celestial", "Transcendent", "Awakened", "Mortal"]:
+        c_list = tiered_page_cards.get(t_name, [])
+        if not c_list:
+            continue
+        emblem = tier_emblems.get(t_name, "⚪")
+        lines = [f"➥ <b>{t_name}</b> {emblem}"]
+        for c in c_list:
+            code = c.get("code", "0000")
+            c_name = escape_html(c.get("name", "Cultivator"))
+            cnt = card_counts.get(c.get("name", "").strip().lower(), 1)
+            lines.append(f"|{code}| <b>{c_name}</b> ⭐ {cnt}X 🏋️")
+        tier_sections.append("\n".join(lines))
+
+    cards_formatted_str = "\n\n──────────────────────\n\n".join(tier_sections) if tier_sections else "<i>No cards match current filter.</i>"
+
+    filter_info = ""
+    if tier_filter != "All":
+        filter_info += f" | {tier_filter}"
     if time_filter == "lt24h":
-        filter_info += " | ⏱️ < 24h"
+        filter_info += " | <24h"
     elif time_filter == "gt24h":
-        filter_info += " | ⏱️ > 24h"
+        filter_info += " | >24h"
+
+    header_line = f"<b>{uname}'s crew</b> ➥ <b>Page {page+1}/{total_pages}</b>{filter_info}"
+    divider = "══════════════════════"
 
     text = (
-        f"📜 <b>Your Cultivation Roster</b> (Page {page+1}/{total_pages} | Total: {total_cards}{filter_info}):\n\n"
-        f"{cards_str}\n\n"
-        f"💡 Use <code>/showcard &lt;code&gt;</code> to view details."
+        f"{divider}\n"
+        f"{header_line}\n"
+        f"{divider}\n\n"
+        f"{cards_formatted_str}"
     )
 
     keyboard_rows = []
 
-    # Navigation row
-    nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"mycards_p_{page-1}_{tier_filter}_{time_filter}"))
-    nav_buttons.append(InlineKeyboardButton(f"📄 {page+1}/{total_pages}", callback_data="mycards_noop"))
-    if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"mycards_p_{page+1}_{tier_filter}_{time_filter}"))
-    keyboard_rows.append(nav_buttons)
-
-    # Action buttons row: Sort by Tier & Time Filter Menu
-    time_label = "⏱️ Time: All"
-    if time_filter == "lt24h":
-        time_label = "⏱️ Time: < 24h"
-    elif time_filter == "gt24h":
-        time_label = "⏱️ Time: > 24h"
+    sort_tier_label = f"Sort By Tier ({tier_filter})" if tier_filter != "All" else "Sort By Tier"
+    time_label = "Sort By Time (<24h)" if time_filter == "lt24h" else ("Sort By Time (>24h)" if time_filter == "gt24h" else "Sort By Time")
 
     keyboard_rows.append([
-        InlineKeyboardButton(f"🗂️ Sort by Tier ({tier_filter})", callback_data=f"mycards_menu_tiers_{page}_{time_filter}"),
+        InlineKeyboardButton(sort_tier_label, callback_data=f"mycards_menu_tiers_{page}_{time_filter}"),
         InlineKeyboardButton(time_label, callback_data=f"mycards_menu_time_{page}_{tier_filter}")
     ])
+
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("◀️", callback_data=f"mycards_p_{page-1}_{tier_filter}_{time_filter}"))
+    nav_buttons.append(InlineKeyboardButton(f"📄 {page+1}/{total_pages}", callback_data="mycards_noop"))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("▶️", callback_data=f"mycards_p_{page+1}_{tier_filter}_{time_filter}"))
+
+    keyboard_rows.append(nav_buttons)
 
     return text, InlineKeyboardMarkup(keyboard_rows)
 
@@ -4935,6 +4965,13 @@ async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     tier_str = TIER_EMOJIS.get(claimed_card["tier"], claimed_card["tier"])
     worth = get_card_worth(claimed_card)
     code = claimed_card["code"]
+
+    send_telegram_log(
+        f"🎉 <b>CARD RECRUITED / CLAIMED</b>\n"
+        f"👤 <b>User:</b> {uname} (@{user.username or 'none'}, ID: <code>{user.id}</code>)\n"
+        f"🎴 <b>Card Recruited:</b> <b>{cname}</b> (Code: <code>{code}</code>, Tier: {claimed_card['tier']})\n"
+        f"📍 <b>Group Chat:</b> <code>{chat_id}</code>"
+    )
 
     await update.message.reply_text(
         f"🎉 <b>{uname} recruited {cname} into their crew!</b> 🏆\n\n"
