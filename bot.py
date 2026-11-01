@@ -1739,7 +1739,9 @@ def get_user_roster_view(user_id: int, page: int = 0, tier_filter: str = "All", 
             code = c.get("code", "0000")
             c_name = escape_html(c.get("name", "Cultivator"))
             cnt = card_counts.get(c.get("name", "").strip().lower(), 1)
-            lines.append(f"|{code}| <b>{c_name}</b> ⭐ {cnt}X 🏋️")
+            is_perm = c.get("is_permanent", False)
+            perm_str = " 🏋️" if is_perm else ""
+            lines.append(f"|{code}| <b>{c_name}</b> {cnt}X{perm_str}")
         tier_sections.append("\n".join(lines))
 
     cards_formatted_str = "\n\n──────────────────────\n\n".join(tier_sections) if tier_sections else "<i>No cards match current filter.</i>"
