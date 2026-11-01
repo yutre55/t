@@ -45,6 +45,28 @@ USERS_DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user
 REMINDERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reminders.json")
 KEYS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "groq_keys.json")
 
+# ==================== MONGO DATABASE SETUP ====================
+MONGO_URI = os.getenv("MONGO_URI") or os.getenv("MONGODB_URI")
+mongo_client = None
+mongo_db = None
+
+def get_mongo_db():
+    global mongo_client, mongo_db
+    if mongo_db is not None:
+        return mongo_db
+    if MONGO_URI:
+        try:
+            mongo_client = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+            mongo_db = mongo_client["sylvi_bot_db"]
+            mongo_client.admin.command('ping')
+            logger.info("✅ Connected to MongoDB Atlas (database: sylvi_bot_db)!")
+            return mongo_db
+        except Exception as e:
+            logger.warning(f"⚠️ MongoDB connection failed, fallback to local JSON storage: {e}")
+            mongo_client = None
+            mongo_db = None
+    return None
+
 # ==================== ACTIVITY LOGS SETUP ====================
 LOGS_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs_config.json")
 
@@ -105,28 +127,6 @@ def send_telegram_log(text: str):
             pass
     except Exception as e:
         logger.warning(f"Could not send Telegram activity log: {e}")
-
-# ==================== MONGO DATABASE SETUP ====================
-MONGO_URI = os.getenv("MONGO_URI") or os.getenv("MONGODB_URI")
-mongo_client = None
-mongo_db = None
-
-def get_mongo_db():
-    global mongo_client, mongo_db
-    if mongo_db is not None:
-        return mongo_db
-    if MONGO_URI:
-        try:
-            mongo_client = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-            mongo_db = mongo_client["sylvi_bot_db"]
-            mongo_client.admin.command('ping')
-            logger.info("✅ Connected to MongoDB Atlas (database: sylvi_bot_db)!")
-            return mongo_db
-        except Exception as e:
-            logger.warning(f"⚠️ MongoDB connection failed, fallback to local JSON storage: {e}")
-            mongo_client = None
-            mongo_db = None
-    return None
 
 def load_stored_keys() -> List[str]:
     """Loads initial keys from .env and merges with persistent keys in groq_keys.json or MongoDB."""
