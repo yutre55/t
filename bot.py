@@ -49,12 +49,22 @@ KEYS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "groq_keys.
 LOGS_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs_config.json")
 
 def load_logs_gc_id() -> int:
+    db = get_mongo_db()
+    if db is not None:
+        try:
+            doc = db["logs_config"].find_one({"_id": "logs_gc"})
+            if doc and "logs_gc_id" in doc:
+                return int(doc["logs_gc_id"])
+        except Exception as e:
+            logger.error(f"Error loading logs_gc_id from MongoDB: {e}")
+
     if os.path.exists(LOGS_CONFIG_FILE):
         try:
             with open(LOGS_CONFIG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f).get("logs_gc_id", 0)
+                return int(json.load(f).get("logs_gc_id", 0))
         except Exception:
             pass
+
     return int(os.getenv("LOGS_GC_ID", "0"))
 
 def save_logs_gc_id(chat_id: int):
@@ -63,6 +73,18 @@ def save_logs_gc_id(chat_id: int):
             json.dump({"logs_gc_id": chat_id}, f, indent=2)
     except Exception as e:
         logger.error(f"Error saving logs_config.json: {e}")
+
+    db = get_mongo_db()
+    if db is not None:
+        try:
+            db["logs_config"].replace_one(
+                {"_id": "logs_gc"},
+                {"_id": "logs_gc", "logs_gc_id": chat_id, "updated_at": time.time()},
+                upsert=True
+            )
+            logger.info(f"✅ Saved LOGS_GC_ID ({chat_id}) to MongoDB logs_config collection.")
+        except Exception as e:
+            logger.error(f"Error saving logs_gc_id to MongoDB: {e}")
 
 LOGS_GC_ID = load_logs_gc_id()
 
@@ -538,26 +560,82 @@ TIER_EMOJIS = {
     "Primordial": "🔥 Primordial"
 }
 
+TIER_RATES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tier_rates.json")
+DEFAULT_TIER_PROBABILITIES = {
+    "Primordial": 0.01,
+    "Celestial": 0.20,
+    "Transcendent": 1.20,
+    "Awakened": 3.50
+}
+
+def load_tier_probabilities() -> Dict[str, float]:
+    rates = dict(DEFAULT_TIER_PROBABILITIES)
+    db = get_mongo_db()
+    if db is not None:
+        try:
+            doc = db["logs_config"].find_one({"_id": "tier_rates"})
+            if doc and "rates" in doc:
+                rates.update(doc["rates"])
+                return rates
+        except Exception as e:
+            logger.error(f"Error loading tier rates from MongoDB: {e}")
+
+    if os.path.exists(TIER_RATES_FILE):
+        try:
+            with open(TIER_RATES_FILE, "r", encoding="utf-8") as f:
+                rates.update(json.load(f))
+        except Exception as e:
+            logger.error(f"Error loading tier_rates.json: {e}")
+    return rates
+
+def save_tier_probabilities(rates: Dict[str, float]):
+    try:
+        with open(TIER_RATES_FILE, "w", encoding="utf-8") as f:
+            json.dump(rates, f, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving tier_rates.json: {e}")
+
+    db = get_mongo_db()
+    if db is not None:
+        try:
+            db["logs_config"].replace_one(
+                {"_id": "tier_rates"},
+                {"_id": "tier_rates", "rates": rates, "updated_at": time.time()},
+                upsert=True
+            )
+        except Exception as e:
+            logger.error(f"Error saving tier rates to MongoDB: {e}")
+
+TIER_PROBABILITIES: Dict[str, float] = load_tier_probabilities()
+
 def roll_card_tier() -> str:
     """
-    Tier Probabilities:
-    - Mortal: 95.09%
-    - Awakened: 3.50%
-    - Transcendent: 1.20%
-    - Celestial: 0.20%
-    - Primordial: 0.01%
+    Dynamic Tier Probabilities (adjustable via /rarity):
     """
+    p_p = TIER_PROBABILITIES.get("Primordial", 0.01)
+    p_c = TIER_PROBABILITIES.get("Celestial", 0.20)
+    p_t = TIER_PROBABILITIES.get("Transcendent", 1.20)
+    p_a = TIER_PROBABILITIES.get("Awakened", 3.50)
+
     roll = random.uniform(0, 100)
-    if roll < 0.01:
+
+    cum_p = p_p
+    if roll < cum_p:
         return "Primordial"
-    elif roll < 0.21:
+
+    cum_c = cum_p + p_c
+    if roll < cum_c:
         return "Celestial"
-    elif roll < 1.41:
+
+    cum_t = cum_c + p_t
+    if roll < cum_t:
         return "Transcendent"
-    elif roll < 4.91:
+
+    cum_a = cum_t + p_a
+    if roll < cum_a:
         return "Awakened"
-    else:
-        return "Mortal"
+
+    return "Mortal"
 
 def create_card_instance(owner_id: int, forced_tier: Optional[str] = None) -> Dict:
     tier = forced_tier if forced_tier else roll_card_tier()
@@ -3537,6 +3615,226 @@ async def cultivate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
 
 owner_addcard_sessions: Dict[int, Dict] = {}  # user_id -> {"step": str, "photo": str, "tier": str}
+owner_rarity_sessions: Dict[int, Dict] = {}   # user_id -> {"action": str, "step": str, "target_card": Dict}
+
+async def rarity_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Owner command to change card details or adjust tier spawn rates / rarity percentages."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user_id = update.message.from_user.id
+    if not is_owner(user_id):
+        await update.message.reply_text("🚫 Only the bot owner can use this command!")
+        return
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🖼️ Change Card Image", callback_data="rarity_act_image"),
+            InlineKeyboardButton("✏️ Change Card Name", callback_data="rarity_act_name")
+        ],
+        [
+            InlineKeyboardButton("⚖️ Adjust Tier Spawn Rates / Rarity", callback_data="rarity_act_rates")
+        ],
+        [
+            InlineKeyboardButton("❌ Cancel Wizard", callback_data="rarity_act_cancel")
+        ]
+    ])
+
+    p_p = TIER_PROBABILITIES.get("Primordial", 0.01)
+    p_c = TIER_PROBABILITIES.get("Celestial", 0.20)
+    p_t = TIER_PROBABILITIES.get("Transcendent", 1.20)
+    p_a = TIER_PROBABILITIES.get("Awakened", 3.50)
+    p_m = max(0.0, round(100.0 - (p_p + p_c + p_t + p_a), 4))
+
+    await update.message.reply_text(
+        "✨ <b>GLOBAL CARD EDIT & RARITY WIZARD (/rarity)</b>\n\n"
+        "📊 <b>Current Active Tier Spawn Rates:</b>\n"
+        f"• 🔥 Primordial: <code>{p_p}%</code>\n"
+        f"• 🟣 Celestial: <code>{p_c}%</code>\n"
+        f"• 🔵 Transcendent: <code>{p_t}%</code>\n"
+        f"• 🟢 Awakened: <code>{p_a}%</code>\n"
+        f"• ⚪ Mortal: <code>{p_m}%</code> (remainder)\n\n"
+        "Select what you want to edit:",
+        reply_markup=keyboard,
+        parse_mode='HTML'
+    )
+
+async def rarity_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.from_user:
+        return
+
+    user_id = query.from_user.id
+    if not is_owner(user_id):
+        await query.answer("🚫 Only the bot owner can use this feature!", show_alert=True)
+        return
+
+    data = query.data or ""
+    await query.answer()
+
+    if data == "rarity_act_cancel":
+        owner_rarity_sessions.pop(user_id, None)
+        await query.edit_message_text("❌ <b>Global Card Edit Wizard Canceled!</b>", parse_mode='HTML')
+        return
+
+    if data == "rarity_act_image":
+        owner_rarity_sessions[user_id] = {
+            "action": "change_image",
+            "step": "awaiting_card_code"
+        }
+        await query.edit_message_text(
+            "🖼️ <b>CARD IMAGE UPDATE (Step 1/2)</b>\n\n"
+            "Please send/type the <b>4-digit Card Code</b> (or Card Pool ID) of the card whose image you want to change:",
+            parse_mode='HTML'
+        )
+        return
+
+    if data == "rarity_act_name":
+        owner_rarity_sessions[user_id] = {
+            "action": "change_name",
+            "step": "awaiting_card_code"
+        }
+        await query.edit_message_text(
+            "✏️ <b>CARD NAME UPDATE (Step 1/2)</b>\n\n"
+            "Please send/type the <b>4-digit Card Code</b> (or Card Pool ID) of the card whose name you want to change:",
+            parse_mode='HTML'
+        )
+        return
+
+    if data == "rarity_act_rates":
+        p_p = TIER_PROBABILITIES.get("Primordial", 0.01)
+        p_c = TIER_PROBABILITIES.get("Celestial", 0.20)
+        p_t = TIER_PROBABILITIES.get("Transcendent", 1.20)
+        p_a = TIER_PROBABILITIES.get("Awakened", 3.50)
+
+        rate_buttons = [
+            [InlineKeyboardButton(f"🔥 Primordial ({p_p}%)", callback_data="rarity_rate_Primordial")],
+            [InlineKeyboardButton(f"🟣 Celestial ({p_c}%)", callback_data="rarity_rate_Celestial")],
+            [InlineKeyboardButton(f"🔵 Transcendent ({p_t}%)", callback_data="rarity_rate_Transcendent")],
+            [InlineKeyboardButton(f"🟢 Awakened ({p_a}%)", callback_data="rarity_rate_Awakened")],
+            [InlineKeyboardButton("🔄 Reset to Default Rates", callback_data="rarity_rate_reset")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="rarity_act_cancel")]
+        ]
+        keyboard = InlineKeyboardMarkup(rate_buttons)
+        await query.edit_message_text(
+            "⚖️ <b>ADJUST TIER SPAWN RATES & RARITY</b>\n\n"
+            "Select a tier below to change its spawn probability (e.g. make Primordial/Celestial rarer or common):",
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+        return
+
+    if data == "rarity_rate_reset":
+        TIER_PROBABILITIES.clear()
+        TIER_PROBABILITIES.update(DEFAULT_TIER_PROBABILITIES)
+        save_tier_probabilities(TIER_PROBABILITIES)
+        owner_rarity_sessions.pop(user_id, None)
+
+        send_telegram_log("🔄 <b>Tier Spawn Rates Reset to Default</b> by owner.")
+        await query.edit_message_text("✅ <b>Tier Spawn Rates Reset to Default Values!</b>", parse_mode='HTML')
+        return
+
+    if data.startswith("rarity_rate_"):
+        target_tier = data.replace("rarity_rate_", "")
+        current_val = TIER_PROBABILITIES.get(target_tier, 0.01)
+
+        owner_rarity_sessions[user_id] = {
+            "action": "change_rate",
+            "step": "awaiting_rate_val",
+            "target_tier": target_tier
+        }
+
+        symbol = TIER_SYMBOLS.get(target_tier, target_tier)
+        await query.edit_message_text(
+            f"⚖️ <b>CHANGE SPAWN RATE FOR {symbol} {target_tier.upper()}</b>\n\n"
+            f"• <b>Current Rate:</b> <code>{current_val}%</code>\n\n"
+            f"✏️ Please type and send the <b>New Percentage Value</b> in chat:\n"
+            f"<i>Examples:</i>\n"
+            f"• <code>0.001</code> (Ultra rare - 1 in 100,000)\n"
+            f"• <code>0.005</code> (Extremely rare - 1 in 20,000)\n"
+            f"• <code>0.01</code> (Standard Primordial rate)",
+            parse_mode='HTML'
+        )
+        return
+
+async def finalize_rarity_image_update(update: Update, user_id: int, base_card: Dict, new_photo: str) -> None:
+    if not base_card:
+        return
+    target_code = base_card.get("code")
+    target_name_lower = base_card.get("name", "").strip().lower()
+
+    # 1. Update in cards_pool_db
+    base_card["photo"] = new_photo
+    save_cards_pool(cards_pool_db)
+
+    # 2. Update ALL matching user card instances in user_cards_db
+    updated_count = 0
+    for key, u_card in user_cards_db.items():
+        if str(u_card.get("code", "")).upper() == str(target_code).upper() or u_card.get("name", "").strip().lower() == target_name_lower:
+            u_card["photo"] = new_photo
+            updated_count += 1
+
+    save_user_cards(user_cards_db)
+    owner_rarity_sessions.pop(user_id, None)
+
+    c_name = escape_html(base_card.get("name"))
+    t_emoji = TIER_EMOJIS.get(base_card.get("tier"), base_card.get("tier"))
+
+    send_telegram_log(
+        f"🖼️ <b>GLOBAL CARD IMAGE UPDATED</b>\n"
+        f"🎴 <b>Card:</b> {t_emoji} - <b>{c_name}</b> (Code: <code>{target_code}</code>)\n"
+        f"👥 <b>Updated in Rosters:</b> <code>{updated_count} user card instances</code>"
+    )
+
+    msg = (
+        f"✅ <b>CARD IMAGE UPDATED GLOBALLY!</b> 🎉\n\n"
+        f"⚔️ <b>Card:</b> {t_emoji} - <b>{c_name}</b>\n"
+        f"🔑 <b>Code:</b> <code>{target_code}</code>\n"
+        f"👥 <b>Updated across:</b> <code>{updated_count} user rosters</code>\n\n"
+        f"<i>This new image is now live everywhere across the entire bot!</i>"
+    )
+    try:
+        await update.message.reply_photo(photo=new_photo, caption=msg, parse_mode='HTML')
+    except Exception:
+        await update.message.reply_text(msg, parse_mode='HTML')
+
+async def finalize_rarity_name_update(update: Update, user_id: int, base_card: Dict, new_name: str) -> None:
+    if not base_card:
+        return
+    target_code = base_card.get("code")
+    old_name_lower = base_card.get("name", "").strip().lower()
+
+    # 1. Update in cards_pool_db
+    base_card["name"] = new_name
+    save_cards_pool(cards_pool_db)
+
+    # 2. Update ALL matching user card instances in user_cards_db
+    updated_count = 0
+    for key, u_card in user_cards_db.items():
+        if str(u_card.get("code", "")).upper() == str(target_code).upper() or u_card.get("name", "").strip().lower() == old_name_lower:
+            u_card["name"] = new_name
+            updated_count += 1
+
+    save_user_cards(user_cards_db)
+    owner_rarity_sessions.pop(user_id, None)
+
+    c_name_esc = escape_html(new_name)
+    t_emoji = TIER_EMOJIS.get(base_card.get("tier"), base_card.get("tier"))
+
+    send_telegram_log(
+        f"✏️ <b>GLOBAL CARD NAME UPDATED</b>\n"
+        f"🎴 <b>New Name:</b> {t_emoji} - <b>{c_name_esc}</b> (Code: <code>{target_code}</code>)\n"
+        f"👥 <b>Updated in Rosters:</b> <code>{updated_count} user card instances</code>"
+    )
+
+    msg = (
+        f"✅ <b>CARD NAME UPDATED GLOBALLY!</b> 🎉\n\n"
+        f"⚔️ <b>New Name:</b> {t_emoji} - <b>{c_name_esc}</b>\n"
+        f"🔑 <b>Code:</b> <code>{target_code}</code>\n"
+        f"👥 <b>Updated across:</b> <code>{updated_count} user rosters</code>\n\n"
+        f"<i>This new name is now live everywhere across the entire bot!</i>"
+    )
+    await update.message.reply_text(msg, parse_mode='HTML')
 
 async def finalize_add_card(update: Update, user_id: int, tier: str, char_name: str, photo: str) -> None:
     used_codes = {str(c.get("code")) for c in cards_pool_db if c.get("code")}
@@ -4232,6 +4530,14 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
     user = update.message.from_user
     user_id = user.id
     track_user_data(user)
+
+    if is_owner(user_id) and user_id in owner_rarity_sessions:
+        session = owner_rarity_sessions[user_id]
+        if session.get("step") == "awaiting_image":
+            photo_file_id = update.message.photo[-1].file_id
+            base_card = session.get("target_card")
+            await finalize_rarity_image_update(update, user_id, base_card, photo_file_id)
+            return
 
     if is_owner(user_id) and user_id in owner_addcard_sessions:
         session = owner_addcard_sessions[user_id]
@@ -5168,12 +5474,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     help_text = (
         "🤖 <b>Sylvi AI &amp; Cultivation Card Bot - Help Menu</b>\n\n"
         "🌌 <b>Cultivation Anime Card System:</b>\n"
-        "• <code>/summon</code> - Summon a recruit drop (Group Chat only, 60m user CD, 1m GC CD).\n"
+        "• <code>/summon</code> - Summon a recruit drop.\n"
         "• <code>/recruit</code> / <code>/claim</code> / <code>/grab</code> - Bring dropped card into your crew.\n"
         "• <code>/mycards</code> / <code>/roster</code> - View your owned cards and stay limits.\n"
         "• <code>/scard &lt;code&gt;</code> / <code>/showcard</code> - View card details (Name, Worth, Tier, Stay Time).\n"
         "• <code>/discard &lt;code&gt;</code> - Discard a card to receive Spirit Stones (SS) equal to its worth.\n"
-        "• <code>/rcard &lt;code&gt;</code> / <code>/removecard</code> - Remove/release a card from your crew.\n"
         "• <code>/allcards</code> - View all cards available in the global card pool.\n"
         "• <code>/daily</code> - Claim daily 500 Spirit Stones (SS) + 1 Bonus Mortal Card.\n"
         "• <code>/pillshop</code> - View pills shop to extend stay duration.\n"
@@ -5869,12 +6174,11 @@ async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 BOT_COMMANDS_KNOWLEDGE = """
 [Bot Features & Commands Reference Manual for Sylvi]:
 1. Cultivation Anime Card System:
-   • /summon - Group chat mein random recruit drop summon karne ke liye (60 min user cooldown, 1 min group cooldown).
+   • /summon - Group chat mein random recruit drop summon karne ke liye .
    • /claim, /recruit, /grab - Drop hui card ko apne crew mein claim karne ke liye.
    • /mycards, /roster - Apne owned cards, pagination, tier filters (<24h expiring filter) ke sath dekhne ke liye.
    • /showcard <code> - Specific card ki details (Name, Tier, Worth, Stay Time - no code shown) dekhne ke liye.
    • /discard <code> - Card discard karke uski worth ke barabar Spirit Stones (SS) pane ke liye.
-   • /removecard <pool_id_or_name> (Owner) / <4-digit_code> (User) - Global pool ya roster se card delete/remove karne ke liye.
    • /allcards - Global card pool mein available saari cards dekhne ke liye.
    • /daily - Roz ke 500 Spirit Stones (SS) + 1 free Mortal card claim karne ke liye.
    • /pillshop - Card ka stay time badhane ke liye pills kharidne ka shop.
@@ -5928,6 +6232,95 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             owner_addcard_sessions.pop(user.id, None)
 
             await finalize_add_card(update, user.id, tier, char_name, photo)
+            return
+
+    # Check if owner is in wizard step for /rarity
+    if user and is_owner(user.id) and user.id in owner_rarity_sessions:
+        session = owner_rarity_sessions[user.id]
+        step = session.get("step")
+
+        if step == "awaiting_card_code":
+            target_code = user_text.strip().upper()
+            base_card = None
+            for c in cards_pool_db:
+                if str(c.get("code", "")).upper() == target_code or str(c.get("id", "")).upper() == target_code:
+                    base_card = c
+                    break
+            if not base_card:
+                for c in user_cards_db.values():
+                    if str(c.get("code", "")).upper() == target_code:
+                        cname = c.get("name", "").strip().lower()
+                        for pc in cards_pool_db:
+                            if pc.get("name", "").strip().lower() == cname:
+                                base_card = pc
+                                break
+                        break
+
+            if not base_card:
+                await message.reply_text(
+                    f"❌ Card with Code or Pool ID <code>{target_code}</code> not found in database!\n"
+                    f"Please send a valid 4-digit card code (or tap /rarity to try again):",
+                    parse_mode='HTML'
+                )
+                return
+
+            session["target_card"] = base_card
+            act = session.get("action")
+
+            if act == "change_image":
+                session["step"] = "awaiting_image"
+                await message.reply_text(
+                    f"📷 <b>CARD IMAGE UPDATE (Step 2/2)</b>\n\n"
+                    f"Found card: <b>{escape_html(base_card.get('name'))}</b> (Code: <code>{base_card.get('code')}</code>)\n\n"
+                    f"Now please <b>send/upload the new Photo/Image</b> for this card in chat:",
+                    parse_mode='HTML'
+                )
+                return
+            elif act == "change_name":
+                session["step"] = "awaiting_name"
+                await message.reply_text(
+                    f"✏️ <b>CARD NAME UPDATE (Step 2/2)</b>\n\n"
+                    f"Found card: <b>{escape_html(base_card.get('name'))}</b> (Code: <code>{base_card.get('code')}</code>)\n\n"
+                    f"Now please type and send the <b>New Character Name</b> in chat:",
+                    parse_mode='HTML'
+                )
+                return
+
+        elif step == "awaiting_name":
+            new_name = user_text.strip()
+            base_card = session.get("target_card")
+            await finalize_rarity_name_update(update, user.id, base_card, new_name)
+            return
+
+        elif step == "awaiting_rate_val":
+            try:
+                new_rate = float(user_text.strip())
+                if new_rate < 0.0001 or new_rate > 50.0:
+                    await message.reply_text("⚠️ Rate must be a valid number between <code>0.0001</code> and <code>50.0</code>!", parse_mode='HTML')
+                    return
+            except ValueError:
+                await message.reply_text("❌ Invalid number! Please send a valid percentage (e.g. <code>0.001</code> or <code>0.05</code>).", parse_mode='HTML')
+                return
+
+            target_tier = session.get("target_tier", "Primordial")
+            TIER_PROBABILITIES[target_tier] = new_rate
+            save_tier_probabilities(TIER_PROBABILITIES)
+            owner_rarity_sessions.pop(user.id, None)
+
+            symbol = TIER_SYMBOLS.get(target_tier, target_tier)
+            send_telegram_log(
+                f"⚖️ <b>TIER SPAWN RATE UPDATED</b>\n"
+                f"🏷️ <b>Tier:</b> {symbol} {target_tier}\n"
+                f"📈 <b>New Rate:</b> <code>{new_rate}%</code>"
+            )
+
+            await message.reply_text(
+                f"✅ <b>SPAWN RATE UPDATED GLOBALLY!</b> 🎉\n\n"
+                f"🏷️ <b>Tier:</b> {symbol} <b>{target_tier}</b>\n"
+                f"📈 <b>New Spawn Probability:</b> <code>{new_rate}%</code>\n\n"
+                f"<i>This new rarity rate is now active globally for all summons/drops!</i>",
+                parse_mode='HTML'
+            )
             return
 
     base_text = user_text.lower().strip().split('@')[0]
@@ -6585,6 +6978,7 @@ def main():
     app.add_handler(CommandHandler("mines", mine_command))
     app.add_handler(CommandHandler("cultivate", cultivate_command))
     app.add_handler(CommandHandler("addcard", addcard_command))
+    app.add_handler(CommandHandler("rarity", rarity_command))
     app.add_handler(CommandHandler("offer", offer_command))
     app.add_handler(CommandHandler("buyoffer", buyoffer_command))
     app.add_handler(CommandHandler("swap", swap_command))
@@ -6594,6 +6988,7 @@ def main():
 
     # Callback Queries Handler (For /addcard Wizard & Cultivation Inline Buttons)
     app.add_handler(CallbackQueryHandler(addcard_callback_handler, pattern="^addcard_"))
+    app.add_handler(CallbackQueryHandler(rarity_callback_handler, pattern="^rarity_act_"))
     app.add_handler(CallbackQueryHandler(connect4_callback_handler, pattern="^c4_col_"))
     app.add_handler(CallbackQueryHandler(pill_cultivate_callback_handler, pattern="^(buy_pill_|cult_|open_pillshop)"))
     app.add_handler(CallbackQueryHandler(mines_callback_handler, pattern="^mines_"))
