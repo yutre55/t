@@ -524,6 +524,16 @@ def format_time_left(card: Dict) -> str:
     else:
         return f"{mins} Min{'s' if mins > 1 else ''} remaining"
 
+def check_and_reset_daily_limits(eco: Dict):
+    now = time.time()
+    day_seconds = 24 * 3600
+    if now - eco.get("join4_last_reset", 0) > day_seconds:
+        eco["join4_earned_today"] = 0
+        eco["join4_last_reset"] = now
+    if now - eco.get("sendss_last_reset", 0) > day_seconds:
+        eco["sendss_sent_today"] = 0
+        eco["sendss_last_reset"] = now
+
 def get_user_economy(user_id: int) -> Dict:
     uid_str = str(user_id)
     if uid_str not in user_economy_db:
@@ -537,7 +547,11 @@ def get_user_economy(user_id: int) -> Dict:
                 "Emperor's Longevity Pill": 0,
                 "Eternal Life Pill": 0
             },
-            "last_daily": 0.0
+            "last_daily": 0.0,
+            "join4_earned_today": 0,
+            "join4_last_reset": 0.0,
+            "sendss_sent_today": 0,
+            "sendss_last_reset": 0.0
         }
         save_user_economy(user_economy_db)
     else:
@@ -550,6 +564,12 @@ def get_user_economy(user_id: int) -> Dict:
                 "Emperor's Longevity Pill": 0,
                 "Eternal Life Pill": 0
             }
+        if "join4_earned_today" not in u:
+            u["join4_earned_today"] = 0
+            u["join4_last_reset"] = 0.0
+        if "sendss_sent_today" not in u:
+            u["sendss_sent_today"] = 0
+            u["sendss_last_reset"] = 0.0
     return user_economy_db[uid_str]
 
 TIER_EMOJIS = {
@@ -1428,17 +1448,35 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
         if game["player2_id"] == 0:
             eco = get_user_economy(winner_id)
-            eco["spirit_stones"] += 100
-            save_user_economy(user_economy_db)
+            check_and_reset_daily_limits(eco)
 
+            current_earned = eco.get("join4_earned_today", 0)
+            daily_cap = 2000
             board_str = "\n".join([" ".join(r) for r in game["board"]])
-            text = (
-                f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
-                f"{board_str}\n\n"
-                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
-                f"💎 <b>Reward Received:</b> <code>+100 Spirit Stones (SS)</code> 💎\n\n"
-                f"<i>Type /join4 to play again!</i>"
-            )
+
+            if current_earned >= daily_cap:
+                text = (
+                    f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                    f"⚠️ <i>Daily Bot Earnings Limit reached (2,000 SS / day)! No SS awarded for this win. Come back tomorrow or play PvP!</i>"
+                )
+            else:
+                reward = 100
+                if current_earned + reward > daily_cap:
+                    reward = daily_cap - current_earned
+
+                eco["join4_earned_today"] = current_earned + reward
+                eco["spirit_stones"] += reward
+                save_user_economy(user_economy_db)
+
+                text = (
+                    f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                    f"💎 <b>Reward Received:</b> <code>+{reward} SS</code> (Today's Bot Total: {eco['join4_earned_today']}/2000 SS) 💎\n\n"
+                    f"<i>Type /join4 to play again!</i>"
+                )
         else:
             pot = game["bet"] * 2
             eco = get_user_economy(winner_id)
@@ -2288,17 +2326,35 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
         if game["player2_id"] == 0:
             eco = get_user_economy(winner_id)
-            eco["spirit_stones"] += 100
-            save_user_economy(user_economy_db)
+            check_and_reset_daily_limits(eco)
 
+            current_earned = eco.get("join4_earned_today", 0)
+            daily_cap = 2000
             board_str = "\n".join([" ".join(r) for r in game["board"]])
-            text = (
-                f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
-                f"{board_str}\n\n"
-                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
-                f"💎 <b>Reward Received:</b> <code>+100 Spirit Stones (SS)</code> 💎\n\n"
-                f"<i>Type /join4 to play again!</i>"
-            )
+
+            if current_earned >= daily_cap:
+                text = (
+                    f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                    f"⚠️ <i>Daily Bot Earnings Limit reached (2,000 SS / day)! No SS awarded for this win. Come back tomorrow or play PvP!</i>"
+                )
+            else:
+                reward = 100
+                if current_earned + reward > daily_cap:
+                    reward = daily_cap - current_earned
+
+                eco["join4_earned_today"] = current_earned + reward
+                eco["spirit_stones"] += reward
+                save_user_economy(user_economy_db)
+
+                text = (
+                    f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                    f"💎 <b>Reward Received:</b> <code>+{reward} SS</code> (Today's Bot Total: {eco['join4_earned_today']}/2000 SS) 💎\n\n"
+                    f"<i>Type /join4 to play again!</i>"
+                )
         else:
             pot = game["bet"] * 2
             eco = get_user_economy(winner_id)
@@ -3322,17 +3378,35 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
         if game["player2_id"] == 0:
             eco = get_user_economy(winner_id)
-            eco["spirit_stones"] += 100
-            save_user_economy(user_economy_db)
+            check_and_reset_daily_limits(eco)
 
+            current_earned = eco.get("join4_earned_today", 0)
+            daily_cap = 2000
             board_str = "\n".join([" ".join(r) for r in game["board"]])
-            text = (
-                f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
-                f"{board_str}\n\n"
-                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
-                f"💎 <b>Reward Received:</b> <code>+100 Spirit Stones (SS)</code> 💎\n\n"
-                f"<i>Type /join4 to play again!</i>"
-            )
+
+            if current_earned >= daily_cap:
+                text = (
+                    f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                    f"⚠️ <i>Daily Bot Earnings Limit reached (2,000 SS / day)! No SS awarded for this win. Come back tomorrow or play PvP!</i>"
+                )
+            else:
+                reward = 100
+                if current_earned + reward > daily_cap:
+                    reward = daily_cap - current_earned
+
+                eco["join4_earned_today"] = current_earned + reward
+                eco["spirit_stones"] += reward
+                save_user_economy(user_economy_db)
+
+                text = (
+                    f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                    f"💎 <b>Reward Received:</b> <code>+{reward} SS</code> (Today's Bot Total: {eco['join4_earned_today']}/2000 SS) 💎\n\n"
+                    f"<i>Type /join4 to play again!</i>"
+                )
         else:
             pot = game["bet"] * 2
             eco = get_user_economy(winner_id)
@@ -4076,17 +4150,35 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
         if game["player2_id"] == 0:
             eco = get_user_economy(winner_id)
-            eco["spirit_stones"] += 100
-            save_user_economy(user_economy_db)
+            check_and_reset_daily_limits(eco)
 
+            current_earned = eco.get("join4_earned_today", 0)
+            daily_cap = 2000
             board_str = "\n".join([" ".join(r) for r in game["board"]])
-            text = (
-                f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
-                f"{board_str}\n\n"
-                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
-                f"💎 <b>Reward Received:</b> <code>+100 Spirit Stones (SS)</code> 💎\n\n"
-                f"<i>Type /join4 to play again!</i>"
-            )
+
+            if current_earned >= daily_cap:
+                text = (
+                    f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                    f"⚠️ <i>Daily Bot Earnings Limit reached (2,000 SS / day)! No SS awarded for this win. Come back tomorrow or play PvP!</i>"
+                )
+            else:
+                reward = 100
+                if current_earned + reward > daily_cap:
+                    reward = daily_cap - current_earned
+
+                eco["join4_earned_today"] = current_earned + reward
+                eco["spirit_stones"] += reward
+                save_user_economy(user_economy_db)
+
+                text = (
+                    f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                    f"💎 <b>Reward Received:</b> <code>+{reward} SS</code> (Today's Bot Total: {eco['join4_earned_today']}/2000 SS) 💎\n\n"
+                    f"<i>Type /join4 to play again!</i>"
+                )
         else:
             pot = game["bet"] * 2
             eco = get_user_economy(winner_id)
@@ -5067,17 +5159,35 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
         if game["player2_id"] == 0:
             eco = get_user_economy(winner_id)
-            eco["spirit_stones"] += 100
-            save_user_economy(user_economy_db)
+            check_and_reset_daily_limits(eco)
 
+            current_earned = eco.get("join4_earned_today", 0)
+            daily_cap = 2000
             board_str = "\n".join([" ".join(r) for r in game["board"]])
-            text = (
-                f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
-                f"{board_str}\n\n"
-                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
-                f"💎 <b>Reward Received:</b> <code>+100 Spirit Stones (SS)</code> 💎\n\n"
-                f"<i>Type /join4 to play again!</i>"
-            )
+
+            if current_earned >= daily_cap:
+                text = (
+                    f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                    f"⚠️ <i>Daily Bot Earnings Limit reached (2,000 SS / day)! No SS awarded for this win. Come back tomorrow or play PvP!</i>"
+                )
+            else:
+                reward = 100
+                if current_earned + reward > daily_cap:
+                    reward = daily_cap - current_earned
+
+                eco["join4_earned_today"] = current_earned + reward
+                eco["spirit_stones"] += reward
+                save_user_economy(user_economy_db)
+
+                text = (
+                    f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                    f"💎 <b>Reward Received:</b> <code>+{reward} SS</code> (Today's Bot Total: {eco['join4_earned_today']}/2000 SS) 💎\n\n"
+                    f"<i>Type /join4 to play again!</i>"
+                )
         else:
             pot = game["bet"] * 2
             eco = get_user_economy(winner_id)
@@ -5460,6 +5570,94 @@ async def allcards_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await update.message.reply_text(chunk, parse_mode='HTML')
     else:
         await update.message.reply_text(full_text, parse_mode='HTML')
+
+async def sendss_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends Spirit Stones to another user in group chat by replying to their message. Daily limit 5k SS."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    chat_id = update.message.chat.id
+    track_user_data(user)
+
+    if update.message.chat.type not in ['group', 'supergroup']:
+        await update.message.reply_text("⚠️ <code>/sendss</code> command can only be used in group chats by replying to a user!", parse_mode='HTML')
+        return
+
+    if not update.message.reply_to_message or not update.message.reply_to_message.from_user:
+        await update.message.reply_text("⚠️ Usage: Reply to a user's message with <code>/sendss &lt;amount&gt;</code>", parse_mode='HTML')
+        return
+
+    target_user = update.message.reply_to_message.from_user
+    if target_user.id == user.id:
+        await update.message.reply_text("❌ You cannot send Spirit Stones to yourself!", parse_mode='HTML')
+        return
+    if target_user.is_bot:
+        await update.message.reply_text("❌ You cannot send Spirit Stones to bots!", parse_mode='HTML')
+        return
+
+    args = context.args or []
+    if not args or not args[0].isdigit():
+        await update.message.reply_text("⚠️ Usage: Reply to a user with <code>/sendss &lt;amount&gt;</code> (e.g. <code>/sendss 500</code>)", parse_mode='HTML')
+        return
+
+    amount = int(args[0])
+    if amount <= 0:
+        await update.message.reply_text("❌ Amount must be greater than 0!", parse_mode='HTML')
+        return
+
+    sender_eco = get_user_economy(user.id)
+    check_and_reset_daily_limits(sender_eco)
+
+    sent_today = sender_eco.get("sendss_sent_today", 0)
+    daily_send_cap = 5000
+
+    if sent_today + amount > daily_send_cap:
+        rem_allowed = max(0, daily_send_cap - sent_today)
+        await update.message.reply_text(
+            f"❌ <b>Daily Send Limit Reached!</b>\n"
+            f"• Daily Cap: <code>5,000 SS</code>\n"
+            f"• Sent Today: <code>{sent_today} SS</code>\n"
+            f"• Remaining Allowed Today: <code>{rem_allowed} SS</code>",
+            parse_mode='HTML'
+        )
+        return
+
+    if sender_eco["spirit_stones"] < amount:
+        await update.message.reply_text(
+            f"❌ <b>Insufficient Spirit Stones!</b>\n"
+            f"• Your Balance: <code>{sender_eco['spirit_stones']} SS</code>\n"
+            f"• Attempted Send: <code>{amount} SS</code>",
+            parse_mode='HTML'
+        )
+        return
+
+    target_eco = get_user_economy(target_user.id)
+
+    sender_eco["spirit_stones"] -= amount
+    sender_eco["sendss_sent_today"] = sent_today + amount
+    target_eco["spirit_stones"] += amount
+    save_user_economy(user_economy_db)
+
+    sender_name = escape_html(user.first_name)
+    target_name = escape_html(target_user.first_name)
+
+    send_telegram_log(
+        f"💸 <b>SPIRIT STONES TRANSFERRED (/sendss)</b>\n"
+        f"👤 <b>Sender:</b> {sender_name} (ID: <code>{user.id}</code>)\n"
+        f"👤 <b>Receiver:</b> {target_name} (ID: <code>{target_user.id}</code>)\n"
+        f"💎 <b>Amount Sent:</b> <code>+{amount} SS</code> (Today's Sent: {sender_eco['sendss_sent_today']}/5000 SS)\n"
+        f"📍 <b>Group Chat:</b> <code>{chat_id}</code>"
+    )
+
+    await update.message.reply_text(
+        f"💸 <b>SPIRIT STONES TRANSFERRED!</b> 🎉\n\n"
+        f"👤 <b>From:</b> {sender_name}\n"
+        f"👤 <b>To:</b> {target_name}\n"
+        f"💎 <b>Amount:</b> <code>+{amount} SS</code> 💎\n\n"
+        f"💰 <b>Your Balance:</b> <code>{sender_eco['spirit_stones']} SS</code>",
+        parse_mode='HTML'
+    )
 
 # ==================== COMMAND HANDLERS ====================
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -5992,17 +6190,35 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
 
         if game["player2_id"] == 0:
             eco = get_user_economy(winner_id)
-            eco["spirit_stones"] += 100
-            save_user_economy(user_economy_db)
+            check_and_reset_daily_limits(eco)
 
+            current_earned = eco.get("join4_earned_today", 0)
+            daily_cap = 2000
             board_str = "\n".join([" ".join(r) for r in game["board"]])
-            text = (
-                f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
-                f"{board_str}\n\n"
-                f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
-                f"💎 <b>Reward Received:</b> <code>+100 Spirit Stones (SS)</code> 💎\n\n"
-                f"<i>Type /join4 to play again!</i>"
-            )
+
+            if current_earned >= daily_cap:
+                text = (
+                    f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                    f"⚠️ <i>Daily Bot Earnings Limit reached (2,000 SS / day)! No SS awarded for this win. Come back tomorrow or play PvP!</i>"
+                )
+            else:
+                reward = 100
+                if current_earned + reward > daily_cap:
+                    reward = daily_cap - current_earned
+
+                eco["join4_earned_today"] = current_earned + reward
+                eco["spirit_stones"] += reward
+                save_user_economy(user_economy_db)
+
+                text = (
+                    f"🏆 <b>CONNECT 4 - YOU BEAT THE BOT!</b> 🎉\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+                    f"💎 <b>Reward Received:</b> <code>+{reward} SS</code> (Today's Bot Total: {eco['join4_earned_today']}/2000 SS) 💎\n\n"
+                    f"<i>Type /join4 to play again!</i>"
+                )
         else:
             pot = game["bet"] * 2
             eco = get_user_economy(winner_id)
@@ -6664,7 +6880,16 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                     "stay_time": format_time_left(c)
                 })
 
+            u_info = users_db.get(str(user_id), {})
+            user_name = u_info.get("first_name") or "Cultivator"
+
+            fav_card = get_user_fav_card(user_id)
+            fav_photo = fav_card.get("photo", "") if fav_card else ""
+            fav_card_name = fav_card.get("name", "") if fav_card else ""
+            fav_card_tier = fav_card.get("tier", "") if fav_card else ""
+
             data = {
+                "user_name": user_name,
                 "spirit_stones": eco["spirit_stones"],
                 "pills": eco.get("pills", {}),
                 "pill_catalog": PILL_CATALOG,
@@ -6672,7 +6897,10 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 "unique_collected": unique_owned_count,
                 "total_pool": total_pool_count,
                 "completion_pct": completion_pct,
-                "user_cards": cards_list
+                "user_cards": cards_list,
+                "fav_card_photo": fav_photo,
+                "fav_card_name": fav_card_name,
+                "fav_card_tier": fav_card_tier
             }
 
             self.send_response(200)
@@ -6956,6 +7184,7 @@ def main():
     app.add_handler(CommandHandler("mongoimport", mongoimport_command))
     app.add_handler(CommandHandler("4words", fourwords_command))
     app.add_handler(CommandHandler("join4", join4_command))
+    app.add_handler(CommandHandler("sendss", sendss_command))
 
     # Cultivation Anime Card Command Handlers
     app.add_handler(CommandHandler("summon", summon_command))

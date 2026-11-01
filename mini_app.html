@@ -98,12 +98,15 @@
     <div class="aura-blob -bottom-10 left-1/4"></div>
 
     <!-- Top Header -->
-    <header class="p-4 flex justify-between items-center glass-3d sticky top-0 z-50 border-b border-purple-900/40">
+    <header class="p-4 flex justify-between items-center glass-3d sticky top-0 z-50 border-b border-purple-900/40 shadow-xl">
         <div class="flex items-center space-x-3">
-            <div id="user-avatar" class="w-11 h-11 rounded-2xl bg-gradient-to-tr from-purple-600 via-fuchsia-600 to-pink-500 flex items-center justify-center font-extrabold text-white shadow-xl shadow-purple-900/60 border border-white/20">⛩️</div>
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 via-fuchsia-600 to-pink-500 flex items-center justify-center font-extrabold text-white shadow-xl shadow-purple-900/60 border border-purple-400/40 overflow-hidden relative">
+                <span id="user-avatar-icon" class="text-xl">⛩️</span>
+                <img id="user-avatar-img" class="w-full h-full object-cover hidden" alt="Fav Card">
+            </div>
             <div>
                 <h2 id="user-name" class="font-bold text-sm tracking-wide text-slate-100 drop-shadow">Cultivator</h2>
-                <span class="text-[10px] text-purple-300 font-bold uppercase tracking-wider">Immortal Realm</span>
+                <span id="user-fav-subtitle" class="text-[10px] text-purple-300 font-bold uppercase tracking-wider">Immortal Realm</span>
             </div>
         </div>
         <div class="bg-amber-500/15 border border-amber-500/40 px-4 py-2 rounded-2xl flex items-center space-x-1.5 glow-amber shadow-lg">
@@ -284,6 +287,32 @@
             document.getElementById('progress-bar-fill').style.width = `${appData.completion_pct}%`;
             document.getElementById('stat-roster').innerText = appData.roster_count;
             document.getElementById('stat-unique').innerText = `${appData.unique_collected}/${appData.total_pool}`;
+
+            if (appData.user_name) {
+                document.getElementById('user-name').innerText = appData.user_name;
+            }
+
+            const avatarImg = document.getElementById('user-avatar-img');
+            const avatarIcon = document.getElementById('user-avatar-icon');
+            const favSubtitle = document.getElementById('user-fav-subtitle');
+
+            if (appData.fav_card_photo && (appData.fav_card_photo.startsWith('http://') || appData.fav_card_photo.startsWith('https://'))) {
+                avatarImg.src = appData.fav_card_photo;
+                avatarImg.classList.remove('hidden');
+                avatarIcon.classList.add('hidden');
+            } else {
+                avatarImg.classList.add('hidden');
+                avatarIcon.classList.remove('hidden');
+                if (appData.user_name) {
+                    avatarIcon.innerText = appData.user_name.charAt(0).toUpperCase();
+                }
+            }
+
+            if (appData.fav_card_name) {
+                favSubtitle.innerText = `Fav: ${appData.fav_card_name}`;
+            } else {
+                favSubtitle.innerText = 'Immortal Realm';
+            }
 
             // Shop Catalog
             const catalogEl = document.getElementById('shop-catalog');
