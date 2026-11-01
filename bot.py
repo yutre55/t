@@ -1152,8 +1152,8 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     await update.message.reply_text(text, parse_mode='HTML')
 
-async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends an inline button to open the Cultivation Telegram Mini App."""
+async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends an inline button with the Cultivation Mini App link."""
     message = update.effective_message
     if not message:
         return
@@ -1169,7 +1169,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     await message.reply_text(
         "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
-        "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
+        "Tap the button below to open your cultivation dashboard!",
         reply_markup=keyboard,
         parse_mode='HTML'
     )
@@ -1406,18 +1406,8 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
         bot_token = "🟡"
         valid_cols = [c for c in range(7) if game["board"][0][c] == "⚪️"]
         if valid_cols:
+            # Loophole: Bot picks a random valid column and never defends or blocks player!
             bot_col = random.choice(valid_cols)
-            for c in valid_cols:
-                temp_board = [row[:] for row in game["board"]]
-                if drop_token(temp_board, c, bot_token) != -1 and check_connect4_win(temp_board, bot_token):
-                    bot_col = c
-                    break
-            for c in valid_cols:
-                temp_board = [row[:] for row in game["board"]]
-                if drop_token(temp_board, c, "🔴") != -1 and check_connect4_win(temp_board, "🔴"):
-                    bot_col = c
-                    break
-
             drop_token(game["board"], bot_col, bot_token)
 
             if check_connect4_win(game["board"], bot_token):
@@ -1428,9 +1418,8 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
                 text = (
                     f"🤖 <b>CONNECT 4 - SYLVI BOT WINS!</b> 💀\n\n"
                     f"{board_str}\n\n"
-                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n"
-                    f"💸 <b>Bet Lost:</b> <code>-{game['bet']} SS</code>\n\n"
-                    f"<i>Type /join4 &lt;bet&gt; to try again!</i>"
+                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n\n"
+                    f"<i>Type /join4 to try again!</i>"
                 )
                 await query.edit_message_text(text, parse_mode='HTML')
                 return
@@ -1439,15 +1428,11 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
                 game["status"] = "finished"
                 active_connect4_games.pop(chat_id, None)
 
-                eco1 = get_user_economy(game["player1_id"])
-                eco1["spirit_stones"] += game["bet"]
-                save_user_economy(user_economy_db)
-
                 board_str = "\n".join([" ".join(r) for r in game["board"]])
                 text = (
                     f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
                     f"{board_str}\n\n"
-                    f"<i>Bet (<code>{game['bet']} SS</code>) refunded!</i>"
+                    f"<i>Game ended in a draw!</i>"
                 )
                 await query.edit_message_text(text, parse_mode='HTML')
                 return
@@ -1898,8 +1883,8 @@ async def showcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     await update.message.reply_text(text, parse_mode='HTML')
 
-async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends an inline button to open the Cultivation Telegram Mini App."""
+async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends an inline button with the Cultivation Mini App link."""
     message = update.effective_message
     if not message:
         return
@@ -1915,7 +1900,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     await message.reply_text(
         "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
-        "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
+        "Tap the button below to open your cultivation dashboard!",
         reply_markup=keyboard,
         parse_mode='HTML'
     )
@@ -2152,18 +2137,8 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
         bot_token = "🟡"
         valid_cols = [c for c in range(7) if game["board"][0][c] == "⚪️"]
         if valid_cols:
+            # Loophole: Bot picks a random valid column and never defends or blocks player!
             bot_col = random.choice(valid_cols)
-            for c in valid_cols:
-                temp_board = [row[:] for row in game["board"]]
-                if drop_token(temp_board, c, bot_token) != -1 and check_connect4_win(temp_board, bot_token):
-                    bot_col = c
-                    break
-            for c in valid_cols:
-                temp_board = [row[:] for row in game["board"]]
-                if drop_token(temp_board, c, "🔴") != -1 and check_connect4_win(temp_board, "🔴"):
-                    bot_col = c
-                    break
-
             drop_token(game["board"], bot_col, bot_token)
 
             if check_connect4_win(game["board"], bot_token):
@@ -2174,9 +2149,8 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
                 text = (
                     f"🤖 <b>CONNECT 4 - SYLVI BOT WINS!</b> 💀\n\n"
                     f"{board_str}\n\n"
-                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n"
-                    f"💸 <b>Bet Lost:</b> <code>-{game['bet']} SS</code>\n\n"
-                    f"<i>Type /join4 &lt;bet&gt; to try again!</i>"
+                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n\n"
+                    f"<i>Type /join4 to try again!</i>"
                 )
                 await query.edit_message_text(text, parse_mode='HTML')
                 return
@@ -2185,15 +2159,11 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
                 game["status"] = "finished"
                 active_connect4_games.pop(chat_id, None)
 
-                eco1 = get_user_economy(game["player1_id"])
-                eco1["spirit_stones"] += game["bet"]
-                save_user_economy(user_economy_db)
-
                 board_str = "\n".join([" ".join(r) for r in game["board"]])
                 text = (
                     f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
                     f"{board_str}\n\n"
-                    f"<i>Bet (<code>{game['bet']} SS</code>) refunded!</i>"
+                    f"<i>Game ended in a draw!</i>"
                 )
                 await query.edit_message_text(text, parse_mode='HTML')
                 return
@@ -2940,8 +2910,8 @@ async def myprofile_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     await update.message.reply_text(text, parse_mode='HTML')
 
-async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends an inline button to open the Cultivation Telegram Mini App."""
+async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends an inline button with the Cultivation Mini App link."""
     message = update.effective_message
     if not message:
         return
@@ -2957,7 +2927,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     await message.reply_text(
         "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
-        "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
+        "Tap the button below to open your cultivation dashboard!",
         reply_markup=keyboard,
         parse_mode='HTML'
     )
@@ -3194,18 +3164,8 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
         bot_token = "🟡"
         valid_cols = [c for c in range(7) if game["board"][0][c] == "⚪️"]
         if valid_cols:
+            # Loophole: Bot picks a random valid column and never defends or blocks player!
             bot_col = random.choice(valid_cols)
-            for c in valid_cols:
-                temp_board = [row[:] for row in game["board"]]
-                if drop_token(temp_board, c, bot_token) != -1 and check_connect4_win(temp_board, bot_token):
-                    bot_col = c
-                    break
-            for c in valid_cols:
-                temp_board = [row[:] for row in game["board"]]
-                if drop_token(temp_board, c, "🔴") != -1 and check_connect4_win(temp_board, "🔴"):
-                    bot_col = c
-                    break
-
             drop_token(game["board"], bot_col, bot_token)
 
             if check_connect4_win(game["board"], bot_token):
@@ -3216,9 +3176,8 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
                 text = (
                     f"🤖 <b>CONNECT 4 - SYLVI BOT WINS!</b> 💀\n\n"
                     f"{board_str}\n\n"
-                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n"
-                    f"💸 <b>Bet Lost:</b> <code>-{game['bet']} SS</code>\n\n"
-                    f"<i>Type /join4 &lt;bet&gt; to try again!</i>"
+                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n\n"
+                    f"<i>Type /join4 to try again!</i>"
                 )
                 await query.edit_message_text(text, parse_mode='HTML')
                 return
@@ -3227,15 +3186,11 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
                 game["status"] = "finished"
                 active_connect4_games.pop(chat_id, None)
 
-                eco1 = get_user_economy(game["player1_id"])
-                eco1["spirit_stones"] += game["bet"]
-                save_user_economy(user_economy_db)
-
                 board_str = "\n".join([" ".join(r) for r in game["board"]])
                 text = (
                     f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
                     f"{board_str}\n\n"
-                    f"<i>Bet (<code>{game['bet']} SS</code>) refunded!</i>"
+                    f"<i>Game ended in a draw!</i>"
                 )
                 await query.edit_message_text(text, parse_mode='HTML')
                 return
@@ -3489,8 +3444,8 @@ async def finalize_add_card(update: Update, user_id: int, tier: str, char_name: 
     if update.message:
         await update.message.reply_text(text, parse_mode='HTML')
 
-async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends an inline button to open the Cultivation Telegram Mini App."""
+async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends an inline button with the Cultivation Mini App link."""
     message = update.effective_message
     if not message:
         return
@@ -3506,7 +3461,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     await message.reply_text(
         "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
-        "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
+        "Tap the button below to open your cultivation dashboard!",
         reply_markup=keyboard,
         parse_mode='HTML'
     )
@@ -3743,18 +3698,8 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
         bot_token = "🟡"
         valid_cols = [c for c in range(7) if game["board"][0][c] == "⚪️"]
         if valid_cols:
+            # Loophole: Bot picks a random valid column and never defends or blocks player!
             bot_col = random.choice(valid_cols)
-            for c in valid_cols:
-                temp_board = [row[:] for row in game["board"]]
-                if drop_token(temp_board, c, bot_token) != -1 and check_connect4_win(temp_board, bot_token):
-                    bot_col = c
-                    break
-            for c in valid_cols:
-                temp_board = [row[:] for row in game["board"]]
-                if drop_token(temp_board, c, "🔴") != -1 and check_connect4_win(temp_board, "🔴"):
-                    bot_col = c
-                    break
-
             drop_token(game["board"], bot_col, bot_token)
 
             if check_connect4_win(game["board"], bot_token):
@@ -3765,9 +3710,8 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
                 text = (
                     f"🤖 <b>CONNECT 4 - SYLVI BOT WINS!</b> 💀\n\n"
                     f"{board_str}\n\n"
-                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n"
-                    f"💸 <b>Bet Lost:</b> <code>-{game['bet']} SS</code>\n\n"
-                    f"<i>Type /join4 &lt;bet&gt; to try again!</i>"
+                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n\n"
+                    f"<i>Type /join4 to try again!</i>"
                 )
                 await query.edit_message_text(text, parse_mode='HTML')
                 return
@@ -3776,15 +3720,11 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
                 game["status"] = "finished"
                 active_connect4_games.pop(chat_id, None)
 
-                eco1 = get_user_economy(game["player1_id"])
-                eco1["spirit_stones"] += game["bet"]
-                save_user_economy(user_economy_db)
-
                 board_str = "\n".join([" ".join(r) for r in game["board"]])
                 text = (
                     f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
                     f"{board_str}\n\n"
-                    f"<i>Bet (<code>{game['bet']} SS</code>) refunded!</i>"
+                    f"<i>Game ended in a draw!</i>"
                 )
                 await query.edit_message_text(text, parse_mode='HTML')
                 return
@@ -4463,8 +4403,8 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     await update.message.reply_text(text, parse_mode='HTML')
 
-async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends an inline button to open the Cultivation Telegram Mini App."""
+async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends an inline button with the Cultivation Mini App link."""
     message = update.effective_message
     if not message:
         return
@@ -4480,7 +4420,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     await message.reply_text(
         "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
-        "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
+        "Tap the button below to open your cultivation dashboard!",
         reply_markup=keyboard,
         parse_mode='HTML'
     )
@@ -4717,18 +4657,8 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
         bot_token = "🟡"
         valid_cols = [c for c in range(7) if game["board"][0][c] == "⚪️"]
         if valid_cols:
+            # Loophole: Bot picks a random valid column and never defends or blocks player!
             bot_col = random.choice(valid_cols)
-            for c in valid_cols:
-                temp_board = [row[:] for row in game["board"]]
-                if drop_token(temp_board, c, bot_token) != -1 and check_connect4_win(temp_board, bot_token):
-                    bot_col = c
-                    break
-            for c in valid_cols:
-                temp_board = [row[:] for row in game["board"]]
-                if drop_token(temp_board, c, "🔴") != -1 and check_connect4_win(temp_board, "🔴"):
-                    bot_col = c
-                    break
-
             drop_token(game["board"], bot_col, bot_token)
 
             if check_connect4_win(game["board"], bot_token):
@@ -4739,9 +4669,8 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
                 text = (
                     f"🤖 <b>CONNECT 4 - SYLVI BOT WINS!</b> 💀\n\n"
                     f"{board_str}\n\n"
-                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n"
-                    f"💸 <b>Bet Lost:</b> <code>-{game['bet']} SS</code>\n\n"
-                    f"<i>Type /join4 &lt;bet&gt; to try again!</i>"
+                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n\n"
+                    f"<i>Type /join4 to try again!</i>"
                 )
                 await query.edit_message_text(text, parse_mode='HTML')
                 return
@@ -4750,15 +4679,11 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
                 game["status"] = "finished"
                 active_connect4_games.pop(chat_id, None)
 
-                eco1 = get_user_economy(game["player1_id"])
-                eco1["spirit_stones"] += game["bet"]
-                save_user_economy(user_economy_db)
-
                 board_str = "\n".join([" ".join(r) for r in game["board"]])
                 text = (
                     f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
                     f"{board_str}\n\n"
-                    f"<i>Bet (<code>{game['bet']} SS</code>) refunded!</i>"
+                    f"<i>Game ended in a draw!</i>"
                 )
                 await query.edit_message_text(text, parse_mode='HTML')
                 return
@@ -5397,8 +5322,8 @@ async def fourwords_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
     await update.message.reply_text(text, parse_mode='HTML')
 
-async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends an inline button to open the Cultivation Telegram Mini App."""
+async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends an inline button with the Cultivation Mini App link."""
     message = update.effective_message
     if not message:
         return
@@ -5414,7 +5339,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     await message.reply_text(
         "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
-        "Tap the button below to open your cultivation dashboard, check spirit stones, and manage cards in the Mini App!",
+        "Tap the button below to open your cultivation dashboard!",
         reply_markup=keyboard,
         parse_mode='HTML'
     )
@@ -5651,18 +5576,8 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
         bot_token = "🟡"
         valid_cols = [c for c in range(7) if game["board"][0][c] == "⚪️"]
         if valid_cols:
+            # Loophole: Bot picks a random valid column and never defends or blocks player!
             bot_col = random.choice(valid_cols)
-            for c in valid_cols:
-                temp_board = [row[:] for row in game["board"]]
-                if drop_token(temp_board, c, bot_token) != -1 and check_connect4_win(temp_board, bot_token):
-                    bot_col = c
-                    break
-            for c in valid_cols:
-                temp_board = [row[:] for row in game["board"]]
-                if drop_token(temp_board, c, "🔴") != -1 and check_connect4_win(temp_board, "🔴"):
-                    bot_col = c
-                    break
-
             drop_token(game["board"], bot_col, bot_token)
 
             if check_connect4_win(game["board"], bot_token):
@@ -5673,9 +5588,8 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
                 text = (
                     f"🤖 <b>CONNECT 4 - SYLVI BOT WINS!</b> 💀\n\n"
                     f"{board_str}\n\n"
-                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n"
-                    f"💸 <b>Bet Lost:</b> <code>-{game['bet']} SS</code>\n\n"
-                    f"<i>Type /join4 &lt;bet&gt; to try again!</i>"
+                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n\n"
+                    f"<i>Type /join4 to try again!</i>"
                 )
                 await query.edit_message_text(text, parse_mode='HTML')
                 return
@@ -5684,15 +5598,11 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
                 game["status"] = "finished"
                 active_connect4_games.pop(chat_id, None)
 
-                eco1 = get_user_economy(game["player1_id"])
-                eco1["spirit_stones"] += game["bet"]
-                save_user_economy(user_economy_db)
-
                 board_str = "\n".join([" ".join(r) for r in game["board"]])
                 text = (
                     f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
                     f"{board_str}\n\n"
-                    f"<i>Bet (<code>{game['bet']} SS</code>) refunded!</i>"
+                    f"<i>Game ended in a draw!</i>"
                 )
                 await query.edit_message_text(text, parse_mode='HTML')
                 return
@@ -5809,7 +5719,7 @@ BOT_COMMANDS_KNOWLEDGE = """
    • /swap <my_code> <their_code> - Same tier ki cards ko aapas mein swap karne ke liye.
    • /myprofile, /profile - Apna game completion %, unique cards collected, aur tier progress profile dekhne ke liye.
    • /leaderboard, /lb - Sabse zyada Spirit Stones (SS) wale top players ka leaderboard dekhne ke liye.
-   • /app - Telegram Mini App open karne ke liye interactive web app button.
+   • /web - Telegram Mini App open karne ke liye interactive web app button.
    • /mine <bet_ss> <mines_count> - Spirit Stones bet karke Mines betting game khelne ke liye (min bet 50 SS).
 2. General & Game Commands:
    • /status - Bot ka system health, uptime, database status, aur active game stats dekhne ke liye.
@@ -5855,12 +5765,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     base_text = user_text.lower().strip().split('@')[0]
     bot_uname = context.bot.username.lower() if (context.bot and context.bot.username) else ""
-    is_app_cmd = base_text in ["/miniapp", "miniapp", "/app", "app", "/webapp", "webapp"]
-    if bot_uname and user_text.lower().strip() in [f"/miniapp@{bot_uname}", f"/app@{bot_uname}"]:
-        is_app_cmd = True
+    is_web_cmd = base_text in ["/web", "web"]
+    if bot_uname and user_text.lower().strip() == f"/web@{bot_uname}":
+        is_web_cmd = True
 
-    if is_app_cmd:
-        await app_command(update, context)
+    if is_web_cmd:
+        await web_command(update, context)
         return
 
     # Ignore command messages starting with '/'
@@ -6458,7 +6368,7 @@ def main():
     app.add_handler(CommandHandler("start", help_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("status", status_command))
-    app.add_handler(CommandHandler(["miniapp", "app", "webapp"], app_command))
+    app.add_handler(CommandHandler("web", web_command))
     app.add_handler(CommandHandler("leaderboard", leaderboard_command))
     app.add_handler(CommandHandler("lb", leaderboard_command))
     app.add_handler(CommandHandler("logsgc", logsgc_command))
