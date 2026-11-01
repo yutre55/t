@@ -6988,7 +6988,7 @@ def main():
 
     # Callback Queries Handler (For /addcard Wizard & Cultivation Inline Buttons)
     app.add_handler(CallbackQueryHandler(addcard_callback_handler, pattern="^addcard_"))
-    app.add_handler(CallbackQueryHandler(rarity_callback_handler, pattern="^rarity_act_"))
+    app.add_handler(CallbackQueryHandler(rarity_callback_handler, pattern="^rarity_"))
     app.add_handler(CallbackQueryHandler(connect4_callback_handler, pattern="^c4_col_"))
     app.add_handler(CallbackQueryHandler(pill_cultivate_callback_handler, pattern="^(buy_pill_|cult_|open_pillshop)"))
     app.add_handler(CallbackQueryHandler(mines_callback_handler, pattern="^mines_"))
