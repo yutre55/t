@@ -1753,13 +1753,110 @@ def get_user_roster_view(user_id: int, page: int = 0, tier_filter: str = "All", 
 
     return text, InlineKeyboardMarkup(keyboard_rows)
 
+def get_user_fav_card(user_id: int) -> Optional[Dict]:
+    u_info = users_db.get(str(user_id), {})
+    fav_code = u_info.get("fav_card_code")
+    if fav_code:
+        card = find_user_card_by_code(user_id, str(fav_code))
+        if card and card.get("photo"):
+            return card
+
+    user_cards = [c for c in user_cards_db.values() if c.get("owner_id") == user_id and c.get("photo")]
+    if not user_cards:
+        return None
+
+    tier_order = {"Primordial": 5, "Celestial": 4, "Transcendent": 3, "Awakened": 2, "Mortal": 1}
+    user_cards.sort(key=lambda x: tier_order.get(x.get("tier", "Mortal"), 0), reverse=True)
+    return user_cards[0]
+
+async def favcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sets a card from user's roster as favorite to display its photo in /mycards."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    clean_expired_cards()
+
+    args = context.args or []
+    if not args:
+        fav_card = get_user_fav_card(user.id)
+        if fav_card:
+            c_name = escape_html(fav_card.get("name"))
+            t_emoji = TIER_EMOJIS.get(fav_card.get("tier"), fav_card.get("tier"))
+            code = fav_card.get("code")
+            await update.message.reply_text(
+                f"⭐ <b>Your Current Favorite Card:</b> {t_emoji} - <b>{c_name}</b> (Code: <code>{code}</code>)\n\n"
+                f"💡 To change your favorite card, type: <code>/favcard &lt;card_code_or_name&gt;</code>",
+                parse_mode='HTML'
+            )
+        else:
+            await update.message.reply_text(
+                "⚠️ <b>Usage:</b> <code>/favcard &lt;card_code_or_name&gt;</code> (e.g. <code>/favcard 4444</code>)\n\n"
+                "<i>Setting a favorite card will display its photo whenever you check /mycards!</i>",
+                parse_mode='HTML'
+            )
+        return
+
+    target_query = " ".join(args).strip().lower()
+    matched_card = find_user_card_by_code(user.id, target_query)
+
+    if not matched_card:
+        for c in user_cards_db.values():
+            if c.get("owner_id") == user.id and target_query in c.get("name", "").strip().lower():
+                matched_card = c
+                break
+
+    if not matched_card:
+        await update.message.reply_text(f"❌ Card '<b>{escape_html(target_query)}</b>' not found in your active roster!", parse_mode='HTML')
+        return
+
+    u_info = users_db.get(str(user.id), {})
+    u_info["fav_card_code"] = matched_card.get("code")
+    save_users_data(users_db)
+
+    c_name = escape_html(matched_card.get("name"))
+    t_emoji = TIER_EMOJIS.get(matched_card.get("tier"), matched_card.get("tier"))
+    code = matched_card.get("code")
+
+    msg_text = (
+        f"⭐ <b>FAVORITE CARD SET SUCCESSFULLY!</b> 🎉\n\n"
+        f"🎴 <b>Favorite Card:</b> {t_emoji} - <b>{c_name}</b> (Code: <code>{code}</code>)\n\n"
+        f"💡 This card's image will now appear at the top whenever you run <code>/mycards</code>!"
+    )
+
+    if matched_card.get("photo"):
+        try:
+            await update.message.reply_photo(photo=matched_card["photo"], caption=msg_text, parse_mode='HTML')
+            return
+        except Exception:
+            pass
+
+    await update.message.reply_text(msg_text, parse_mode='HTML')
+
 async def mycards_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Lists user's active cards with pagination and filter buttons."""
+    """Lists user's active cards with favorite card image, descending tier order, pagination and filter buttons."""
     if not update.message or not update.message.from_user:
         return
     user = update.message.from_user
     track_user_data(user)
+
     text, keyboard = get_user_roster_view(user.id, page=0, tier_filter="All", time_filter="all")
+    fav_card = get_user_fav_card(user.id)
+
+    if fav_card and fav_card.get("photo"):
+        try:
+            if len(text) <= 1020:
+                await update.message.reply_photo(photo=fav_card["photo"], caption=text, reply_markup=keyboard, parse_mode='HTML')
+                return
+            else:
+                short_cap = f"⭐ <b>Favorite Card:</b> <b>{escape_html(fav_card.get('name'))}</b> [{fav_card.get('tier')}]"
+                await update.message.reply_photo(photo=fav_card["photo"], caption=short_cap, parse_mode='HTML')
+                await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
+                return
+        except Exception as e:
+            logger.warning(f"Could not send favorite card photo in mycards: {e}")
+
     await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
 
 async def mycards_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2539,6 +2636,13 @@ async def buypill_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     eco["spirit_stones"] -= total_cost
     eco["pills"][pill_name] = eco["pills"].get(pill_name, 0) + qty
     save_user_economy(user_economy_db)
+
+    send_telegram_log(
+        f"🛒 <b>PILL PURCHASED IN SHOP</b>\n"
+        f"👤 <b>User:</b> {escape_html(user.first_name)} (@{user.username or 'none'}, ID: <code>{user.id}</code>)\n"
+        f"💊 <b>Bought:</b> {qty}x <b>{pill_name}</b>\n"
+        f"💰 <b>Total Paid:</b> <code>{total_cost} SS</code> | <b>SS Balance:</b> <code>{eco['spirit_stones']} SS</code>"
+    )
 
     await update.message.reply_text(
         f"✅ <b>PURCHASE SUCCESSFUL!</b>\n\n"
@@ -4170,6 +4274,14 @@ async def offer_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     tier_str = TIER_EMOJIS.get(card.get("tier"), card.get("tier"))
     seller_name = escape_html(user.first_name)
 
+    send_telegram_log(
+        f"🛍️ <b>MARKET OFFER CREATED</b>\n"
+        f"👤 <b>Seller:</b> {seller_name} (@{user.username or 'none'}, ID: <code>{user.id}</code>)\n"
+        f"🎴 <b>Card Offered:</b> <b>{c_name}</b> (Code: <code>{code}</code>, Tier: {card.get('tier')})\n"
+        f"💎 <b>Price:</b> <code>{price} SS</code>\n"
+        f"🆔 <b>Offer ID:</b> <code>{offer_id}</code>"
+    )
+
     await update.message.reply_text(
         f"🛍️ <b>CARD OFFER CREATED FOR SALE!</b>\n\n"
         f"👤 <b>Seller:</b> {seller_name}\n"
@@ -4235,6 +4347,15 @@ async def buyoffer_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     buyer_name = escape_html(user.first_name)
     c_name = escape_html(card.get("name"))
+
+    send_telegram_log(
+        f"🤝 <b>MARKET OFFER BOUGHT / TRADED</b>\n"
+        f"👤 <b>Buyer:</b> {buyer_name} (@{user.username or 'none'}, ID: <code>{user.id}</code>)\n"
+        f"👤 <b>Seller ID:</b> <code>{seller_id}</code>\n"
+        f"🎴 <b>Card Traded:</b> <b>{c_name}</b> (Code: <code>{code}</code>)\n"
+        f"💎 <b>Price Paid:</b> <code>{price} SS</code>\n"
+        f"🆔 <b>Offer ID:</b> <code>{offer_id}</code>"
+    )
 
     await update.message.reply_text(
         f"🎉 <b>CARD PURCHASE COMPLETED!</b>\n\n"
@@ -4306,6 +4427,13 @@ async def swap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     their_cname = escape_html(their_card.get("name"))
     other_info = users_db.get(str(other_owner_id), {})
     other_name = escape_html(other_info.get("first_name", f"User {other_owner_id}"))
+
+    send_telegram_log(
+        f"🔄 <b>SAME-TIER CARD SWAP COMPLETED</b>\n"
+        f"👤 <b>User 1:</b> {escape_html(user.first_name)} (@{user.username or 'none'}, ID: <code>{user.id}</code>) gave <b>{my_cname}</b> (Code: <code>{my_code}</code>)\n"
+        f"👤 <b>User 2:</b> {other_name} (ID: <code>{other_owner_id}</code>) gave <b>{their_cname}</b> (Code: <code>{their_code}</code>)\n"
+        f"✨ <b>Tier Matched:</b> {my_tier}"
+    )
 
     await update.message.reply_text(
         f"🔄 <b>SAME-TIER CARD SWAP COMPLETED!</b> 🎉\n\n"
@@ -4813,7 +4941,7 @@ async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"⚔️ <b>Character:</b> <b>{cname}</b>\n"
         f"✨ <b>Tier:</b> {tier_str}\n"
         f"💎 <b>Worth:</b> <code>{worth} SS</code>\n"
-        f"🔑 <b>Roster Code:</b> <code>{code}</code>\n\n"
+        f"🔑 <b>Code:</b> <code>{code}</code>\n\n"
         f"💡 Check your crew anytime with <code>/mycards</code>!",
         parse_mode='HTML'
     )
@@ -5785,6 +5913,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     sender_user_handle = get_user_tag(user)
     chat_id = message.chat.id
 
+    u_info_log = f"{escape_html(sender_name)} ({sender_user_handle}, ID: <code>{user.id if user else 0}</code>)"
+    if user_text.startswith('/'):
+        c_cmd_log = user_text.split()[0]
+        c_loc_log = "Private DM" if chat_type == 'private' else f"Group <code>{chat_id}</code>"
+        send_telegram_log(f"💬 <b>Command Executed:</b> <code>{escape_html(c_cmd_log)}</code>\n👤 <b>User:</b> {u_info_log}\n📍 <b>Location:</b> {c_loc_log}")
+    elif chat_type == 'private':
+        send_telegram_log(f"✉️ <b>Private DM Message:</b>\n👤 <b>User:</b> {u_info_log}\n💬 <b>Msg:</b> <i>{escape_html(user_text[:200])}</i>")
+
     # ==================== 4-LETTER WORD GAME GUESS CHECK ====================
     if word_game.is_game_active(chat_id):
         clean_word = user_text.strip()
@@ -6393,6 +6529,7 @@ def main():
     app.add_handler(CommandHandler("summon", summon_command))
     app.add_handler(CommandHandler("mycards", mycards_command))
     app.add_handler(CommandHandler("roster", mycards_command))
+    app.add_handler(CommandHandler("favcard", favcard_command))
     app.add_handler(CommandHandler(["scard", "showcard"], showcard_command))
     app.add_handler(CommandHandler("search", search_command))
     app.add_handler(CommandHandler("discard", discard_command))
