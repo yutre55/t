@@ -253,25 +253,69 @@ USER_ECONOMY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "us
 
 DEFAULT_CARDS_POOL = []
 
+def assign_pool_card_codes_in_list(pool: List[Dict]):
+    used_codes = {str(c.get("code")) for c in pool if c.get("code")}
+    updated = False
+    for c in pool:
+        if not c.get("code"):
+            while True:
+                code = ''.join(random.choices(string.digits, k=4))
+                if code not in used_codes:
+                    used_codes.add(code)
+                    c["code"] = code
+                    updated = True
+                    break
+    if updated:
+        save_cards_pool(pool)
+
+def find_user_card_by_code(user_id: int, code: str) -> Optional[Dict]:
+    code = code.strip().upper()
+    for key, c in user_cards_db.items():
+        if c.get("owner_id") == user_id and str(c.get("code", "")).strip().upper() == code:
+            return c
+    return None
+
+def remove_user_card_by_code(user_id: int, code: str):
+    code = code.strip().upper()
+    keys_to_remove = []
+    for key, c in user_cards_db.items():
+        if c.get("owner_id") == user_id and str(c.get("code", "")).strip().upper() == code:
+            keys_to_remove.append(key)
+    for key in keys_to_remove:
+        user_cards_db.pop(key, None)
+        db = get_mongo_db()
+        if db is not None:
+            try:
+                db["user_cards"].delete_one({"_id": key})
+            except Exception as e:
+                logger.error(f"Error deleting card {key} from MongoDB: {e}")
+    save_user_cards(user_cards_db)
+
 def load_cards_pool() -> List[Dict]:
     db = get_mongo_db()
+    pool = []
     if db is not None:
         try:
             docs = list(db["cards_pool"].find({}))
             if docs:
                 for d in docs:
                     d.pop("_id", None)
-                return docs
+                    pool.append(d)
         except Exception as e:
             logger.error(f"Error loading cards_pool from MongoDB: {e}")
 
-    if os.path.exists(CARDS_POOL_FILE):
+    if not pool and os.path.exists(CARDS_POOL_FILE):
         try:
             with open(CARDS_POOL_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                pool = json.load(f)
         except Exception as e:
             logger.error(f"Error loading cards_pool.json: {e}")
-    return list(DEFAULT_CARDS_POOL)
+
+    if not pool:
+        pool = list(DEFAULT_CARDS_POOL)
+
+    assign_pool_card_codes_in_list(pool)
+    return pool
 
 def save_cards_pool(pool: List[Dict]):
     try:
@@ -299,8 +343,10 @@ def load_user_cards() -> Dict[str, Dict]:
             if docs:
                 m_data = {}
                 for d in docs:
-                    code = str(d.pop("_id"))
-                    m_data[code] = d
+                    doc_id = str(d.pop("_id"))
+                    if "_" not in doc_id and "owner_id" in d:
+                        doc_id = f"{d['owner_id']}_{doc_id}"
+                    m_data[doc_id] = d
                 return m_data
         except Exception as e:
             logger.error(f"Error loading user_cards from MongoDB: {e}")
@@ -308,7 +354,13 @@ def load_user_cards() -> Dict[str, Dict]:
     if os.path.exists(USER_CARDS_FILE):
         try:
             with open(USER_CARDS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                m_data = {}
+                for k, v in data.items():
+                    if "_" not in k and isinstance(v, dict) and "owner_id" in v:
+                        k = f"{v['owner_id']}_{k}"
+                    m_data[k] = v
+                return m_data
         except Exception as e:
             logger.error(f"Error loading user_cards.json: {e}")
     return {}
@@ -325,7 +377,7 @@ def save_user_cards(data: Dict[str, Dict]):
         try:
             col = db["user_cards"]
             if data:
-                bulk = [pymongo.ReplaceOne({"_id": code}, {"_id": code, **c_info}, upsert=True) for code, c_info in data.items()]
+                bulk = [pymongo.ReplaceOne({"_id": k}, {"_id": k, **c_info}, upsert=True) for k, c_info in data.items()]
                 col.bulk_write(bulk)
         except Exception as e:
             logger.error(f"Error saving user_cards to MongoDB: {e}")
@@ -512,11 +564,15 @@ def create_card_instance(owner_id: int, forced_tier: Optional[str] = None) -> Di
     matching_pool = [c for c in cards_pool_db if c.get("tier", "").lower() == tier.lower()]
 
     if not matching_pool:
-        base_card = {"id": f"DEF_{int(time.time())}", "name": f"{tier} Cultivator", "tier": tier, "photo": ""}
+        base_card = {"id": f"DEF_{int(time.time())}", "code": ''.join(random.choices(string.digits, k=4)), "name": f"{tier} Cultivator", "tier": tier, "photo": ""}
     else:
         base_card = random.choice(matching_pool)
 
-    code = generate_unique_card_code()
+    code = base_card.get("code")
+    if not code:
+        code = ''.join(random.choices(string.digits, k=4))
+        base_card["code"] = code
+
     now = time.time()
     worth = TIER_WORTH.get(tier, 200)
     card_data = {
@@ -531,7 +587,8 @@ def create_card_instance(owner_id: int, forced_tier: Optional[str] = None) -> Di
         "is_permanent": False
     }
 
-    user_cards_db[code] = card_data
+    instance_key = f"{owner_id}_{code}"
+    user_cards_db[instance_key] = card_data
     save_user_cards(user_cards_db)
     logger.info(f"✨ Created Card '{card_data['name']}' [{tier}] Code={code} for User {owner_id}")
     return card_data
@@ -1104,11 +1161,11 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    base_url = os.getenv("RENDER_EXTERNAL_URL") or f"http://127.0.0.1:{os.getenv('PORT', '8080')}"
+    base_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-3-zb94.onrender.com"
     web_app_url = base_url.rstrip("/") + "/"
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
+        [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
     ])
 
     await message.reply_text(
@@ -1117,6 +1174,275 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         reply_markup=keyboard,
         parse_mode='HTML'
     )
+
+# ==================== CONNECT 4 GAME (/JOIN4) ====================
+active_connect4_games: Dict[int, Dict] = {}  # chat_id -> game_state
+
+def check_connect4_win(board, token) -> bool:
+    rows = 6
+    cols = 7
+    # Horizontal
+    for r in range(rows):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r][c+1] == token and board[r][c+2] == token and board[r][c+3] == token:
+                return True
+    # Vertical
+    for r in range(rows - 3):
+        for c in range(cols):
+            if board[r][c] == token and board[r+1][c] == token and board[r+2][c] == token and board[r+3][c] == token:
+                return True
+    # Diagonal positive slope
+    for r in range(rows - 3):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r+1][c+1] == token and board[r+2][c+2] == token and board[r+3][c+3] == token:
+                return True
+    # Diagonal negative slope
+    for r in range(3, rows):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r-1][c+1] == token and board[r-2][c+2] == token and board[r-3][c+3] == token:
+                return True
+    return False
+
+def is_board_full(board) -> bool:
+    return all(board[0][c] != "⚪️" for c in range(7))
+
+def drop_token(board, col, token) -> int:
+    for r in range(5, -1, -1):
+        if board[r][col] == "⚪️":
+            board[r][col] = token
+            return r
+    return -1
+
+def build_connect4_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    row_buttons = []
+    for c in range(7):
+        row_buttons.append(InlineKeyboardButton(f"⬇️ {c+1}", callback_data=f"c4_col_{c}"))
+    return InlineKeyboardMarkup([row_buttons])
+
+def format_connect4_board(game: Dict) -> str:
+    board = game["board"]
+    board_str = "\n".join([" ".join(row) for row in board])
+    p1 = escape_html(game["player1_name"])
+    p2 = escape_html(game["player2_name"])
+    turn_name = p1 if game["current_turn"] == game["player1_id"] else p2
+    turn_token = "🔴" if game["current_turn"] == game["player1_id"] else "🟡"
+
+    return (
+        f"🔴 <b>CONNECT 4 BATTLE</b> 🟡\n\n"
+        f"👤 <b>Player 1 (🔴):</b> {p1}\n"
+        f"👤 <b>Player 2 (🟡):</b> {p2}\n"
+        f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)\n\n"
+        f"{board_str}\n\n"
+        f"👉 <b>Turn:</b> {turn_token} <b>{escape_html(turn_name)}</b>\n"
+        f"<i>Tap column numbers (1-7) below to drop your disk!</i>"
+    )
+
+async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Starts a Connect 4 game vs Bot or another user with Spirit Stones bet."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    chat_id = update.message.chat.id
+
+    args = context.args or []
+    if not args or not args[0].isdigit():
+        await update.message.reply_text(
+            "⚠️ <b>Usage:</b> <code>/join4 &lt;bet_ss&gt;</code>\n"
+            "• Play vs Bot: Type <code>/join4 50</code>\n"
+            "• Play vs User: Reply to someone's message with <code>/join4 50</code>",
+            parse_mode='HTML'
+        )
+        return
+
+    bet = int(args[0])
+    if bet < 10:
+        await update.message.reply_text("❌ Minimum bet for Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
+        return
+
+    eco1 = get_user_economy(user.id)
+    if eco1["spirit_stones"] < bet:
+        await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
+        return
+
+    opponent_id = 0
+    opponent_name = "Sylvi Bot 🤖"
+
+    if update.message.reply_to_message and update.message.reply_to_message.from_user:
+        opp_user = update.message.reply_to_message.from_user
+        if opp_user.id == user.id:
+            await update.message.reply_text("❌ You cannot play against yourself!", parse_mode='HTML')
+            return
+        if opp_user.is_bot:
+            await update.message.reply_text("❌ You cannot challenge bots as a user opponent! (Play vs bot by not replying)", parse_mode='HTML')
+            return
+
+        eco2 = get_user_economy(opp_user.id)
+        if eco2["spirit_stones"] < bet:
+            await update.message.reply_text(f"❌ Opponent <b>{escape_html(opp_user.first_name)}</b> does not have enough Spirit Stones ({bet} SS required)!", parse_mode='HTML')
+            return
+
+        opponent_id = opp_user.id
+        opponent_name = opp_user.first_name
+
+    eco1["spirit_stones"] -= bet
+    save_user_economy(user_economy_db)
+
+    if opponent_id != 0:
+        eco2 = get_user_economy(opponent_id)
+        eco2["spirit_stones"] -= bet
+        save_user_economy(user_economy_db)
+
+    game_state = {
+        "chat_id": chat_id,
+        "player1_id": user.id,
+        "player1_name": user.first_name,
+        "player2_id": opponent_id,
+        "player2_name": opponent_name,
+        "bet": bet,
+        "board": [["⚪️" for _ in range(7)] for _ in range(6)],
+        "current_turn": user.id,
+        "status": "active"
+    }
+    active_connect4_games[chat_id] = game_state
+
+    text = format_connect4_board(game_state)
+    keyboard = build_connect4_keyboard(chat_id)
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
+
+async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.from_user:
+        return
+
+    user = query.from_user
+    chat_id = query.message.chat.id
+    data = query.data or ""
+
+    game = active_connect4_games.get(chat_id)
+    if not game or game["status"] != "active":
+        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4 <bet>.", show_alert=True)
+        return
+
+    if user.id != game["current_turn"]:
+        await query.answer("⏳ It's not your turn!", show_alert=True)
+        return
+
+    col = int(data.replace("c4_col_", ""))
+    token = "🔴" if user.id == game["player1_id"] else "🟡"
+
+    row = drop_token(game["board"], col, token)
+    if row == -1:
+        await query.answer("⚠️ Column is full! Choose another column.", show_alert=True)
+        return
+
+    await query.answer()
+
+    if check_connect4_win(game["board"], token):
+        game["status"] = "finished"
+        active_connect4_games.pop(chat_id, None)
+
+        winner_id = user.id
+        winner_name = user.first_name
+        pot = game["bet"] * 2
+
+        eco = get_user_economy(winner_id)
+        eco["spirit_stones"] += pot
+        save_user_economy(user_economy_db)
+
+        board_str = "\n".join([" ".join(r) for r in game["board"]])
+        text = (
+            f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
+            f"{board_str}\n\n"
+            f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+            f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
+            f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
+        )
+        await query.edit_message_text(text, reply_markup=keyboard if False else None, parse_mode='HTML')
+        return
+
+    if is_board_full(game["board"]):
+        game["status"] = "finished"
+        active_connect4_games.pop(chat_id, None)
+
+        eco1 = get_user_economy(game["player1_id"])
+        eco1["spirit_stones"] += game["bet"]
+        if game["player2_id"] != 0:
+            eco2 = get_user_economy(game["player2_id"])
+            eco2["spirit_stones"] += game["bet"]
+        save_user_economy(user_economy_db)
+
+        board_str = "\n".join([" ".join(r) for r in game["board"]])
+        text = (
+            f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
+            f"{board_str}\n\n"
+            f"<i>Board is full. Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!</i>"
+        )
+        await query.edit_message_text(text, parse_mode='HTML')
+        return
+
+    next_turn = game["player2_id"] if game["current_turn"] == game["player1_id"] else game["player1_id"]
+    game["current_turn"] = next_turn
+
+    if game["status"] == "active" and game["current_turn"] == 0:
+        bot_token = "🟡"
+        valid_cols = [c for c in range(7) if game["board"][0][c] == "⚪️"]
+        if valid_cols:
+            bot_col = random.choice(valid_cols)
+            for c in valid_cols:
+                temp_board = [row[:] for row in game["board"]]
+                if drop_token(temp_board, c, bot_token) != -1 and check_connect4_win(temp_board, bot_token):
+                    bot_col = c
+                    break
+            for c in valid_cols:
+                temp_board = [row[:] for row in game["board"]]
+                if drop_token(temp_board, c, "🔴") != -1 and check_connect4_win(temp_board, "🔴"):
+                    bot_col = c
+                    break
+
+            drop_token(game["board"], bot_col, bot_token)
+
+            if check_connect4_win(game["board"], bot_token):
+                game["status"] = "finished"
+                active_connect4_games.pop(chat_id, None)
+
+                board_str = "\n".join([" ".join(r) for r in game["board"]])
+                text = (
+                    f"🤖 <b>CONNECT 4 - SYLVI BOT WINS!</b> 💀\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n"
+                    f"💸 <b>Bet Lost:</b> <code>-{game['bet']} SS</code>\n\n"
+                    f"<i>Type /join4 &lt;bet&gt; to try again!</i>"
+                )
+                await query.edit_message_text(text, parse_mode='HTML')
+                return
+
+            if is_board_full(game["board"]):
+                game["status"] = "finished"
+                active_connect4_games.pop(chat_id, None)
+
+                eco1 = get_user_economy(game["player1_id"])
+                eco1["spirit_stones"] += game["bet"]
+                save_user_economy(user_economy_db)
+
+                board_str = "\n".join([" ".join(r) for r in game["board"]])
+                text = (
+                    f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
+                    f"{board_str}\n\n"
+                    f"<i>Bet (<code>{game['bet']} SS</code>) refunded!</i>"
+                )
+                await query.edit_message_text(text, parse_mode='HTML')
+                return
+
+            game["current_turn"] = game["player1_id"]
+
+    text = format_connect4_board(game)
+    keyboard = build_connect4_keyboard(chat_id)
+    try:
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+    except Exception:
+        pass
 
 async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Owner command to set the target group chat ID for real-time activity logs."""
@@ -1247,16 +1573,24 @@ async def summon_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_summon_cooldowns[user_id] = now
     chat_summon_cooldowns[chat_id] = now
 
+    if not cards_pool_db:
+        await update.message.reply_text(
+            "⚠️ <b>Global card pool is empty!</b> No cards available to summon. Owner needs to add cards using <code>/addcard</code>.",
+            parse_mode='HTML'
+        )
+        return
+
     dropped_tier = roll_card_tier()
     matching_pool = [c for c in cards_pool_db if c.get("tier", "").lower() == dropped_tier.lower()]
 
     if matching_pool:
         base_card = random.choice(matching_pool)
-        c_name = base_card.get("name", f"{dropped_tier} Cultivator")
-        c_photo = base_card.get("photo", "")
     else:
-        c_name = f"{dropped_tier} Cultivator"
-        c_photo = ""
+        base_card = random.choice(cards_pool_db)
+
+    c_name = base_card.get("name", "Cultivator")
+    dropped_tier = base_card.get("tier", "Mortal")
+    c_photo = base_card.get("photo", "")
 
     send_telegram_log(f"🎴 Card Summoned in chat <code>{chat_id}</code> by {user.first_name} (@{user.username or 'none'}): <b>{c_name}</b> [{dropped_tier}]")
 
@@ -1493,28 +1827,43 @@ async def mycards_callback_handler(update: Update, context: ContextTypes.DEFAULT
             await query.answer()
 
 async def showcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Displays details of a specific card by 4-digit code (Name, Tier, Worth, Stay Time - no code)."""
+    """Displays details of a specific card by 4-digit code (Name, Tier, Worth, Stay Time)."""
     if not update.message:
         return
 
     clean_expired_cards()
     args = context.args or []
     if not args:
-        await update.message.reply_text("⚠️ Usage: <code>/showcard &lt;4-digit_code&gt;</code> (e.g. <code>/showcard 1234</code>)", parse_mode='HTML')
+        await update.message.reply_text("⚠️ Usage: <code>/showcard &lt;4-digit_code&gt;</code> (e.g. <code>/showcard 4444</code>)", parse_mode='HTML')
         return
 
-    code = args[0].strip()
-    card = user_cards_db.get(code)
+    code = args[0].strip().upper()
+    user = update.message.from_user
+    card = None
+    if user:
+        card = find_user_card_by_code(user.id, code)
 
     if not card:
-        await update.message.reply_text(f"❌ Card code <code>{code}</code> not found or has expired from roster!", parse_mode='HTML')
+        for pool_c in cards_pool_db:
+            if str(pool_c.get("code", "")).upper() == code:
+                card = {
+                    "name": pool_c.get("name"),
+                    "tier": pool_c.get("tier"),
+                    "worth": TIER_WORTH.get(pool_c.get("tier", "Mortal").capitalize(), 200),
+                    "photo": pool_c.get("photo", ""),
+                    "is_permanent": False
+                }
+                break
+
+    if not card:
+        await update.message.reply_text(f"❌ Card code <code>{code}</code> not found in database!", parse_mode='HTML')
         return
 
     c_name = escape_html(card.get("name", "Cultivator"))
     tier_name = card.get("tier", "Mortal")
     tier_emoji = TIER_EMOJIS.get(tier_name, tier_name)
     worth = get_card_worth(card)
-    stay_time = format_time_left(card)
+    stay_time = format_time_left(card) if "expire_at" in card else "Global Card Pool"
 
     text = (
         f"⚔️ <b>Name:</b> {c_name}\n"
@@ -1541,11 +1890,11 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    base_url = os.getenv("RENDER_EXTERNAL_URL") or f"http://127.0.0.1:{os.getenv('PORT', '8080')}"
+    base_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-3-zb94.onrender.com"
     web_app_url = base_url.rstrip("/") + "/"
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
+        [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
     ])
 
     await message.reply_text(
@@ -1554,6 +1903,275 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         reply_markup=keyboard,
         parse_mode='HTML'
     )
+
+# ==================== CONNECT 4 GAME (/JOIN4) ====================
+active_connect4_games: Dict[int, Dict] = {}  # chat_id -> game_state
+
+def check_connect4_win(board, token) -> bool:
+    rows = 6
+    cols = 7
+    # Horizontal
+    for r in range(rows):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r][c+1] == token and board[r][c+2] == token and board[r][c+3] == token:
+                return True
+    # Vertical
+    for r in range(rows - 3):
+        for c in range(cols):
+            if board[r][c] == token and board[r+1][c] == token and board[r+2][c] == token and board[r+3][c] == token:
+                return True
+    # Diagonal positive slope
+    for r in range(rows - 3):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r+1][c+1] == token and board[r+2][c+2] == token and board[r+3][c+3] == token:
+                return True
+    # Diagonal negative slope
+    for r in range(3, rows):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r-1][c+1] == token and board[r-2][c+2] == token and board[r-3][c+3] == token:
+                return True
+    return False
+
+def is_board_full(board) -> bool:
+    return all(board[0][c] != "⚪️" for c in range(7))
+
+def drop_token(board, col, token) -> int:
+    for r in range(5, -1, -1):
+        if board[r][col] == "⚪️":
+            board[r][col] = token
+            return r
+    return -1
+
+def build_connect4_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    row_buttons = []
+    for c in range(7):
+        row_buttons.append(InlineKeyboardButton(f"⬇️ {c+1}", callback_data=f"c4_col_{c}"))
+    return InlineKeyboardMarkup([row_buttons])
+
+def format_connect4_board(game: Dict) -> str:
+    board = game["board"]
+    board_str = "\n".join([" ".join(row) for row in board])
+    p1 = escape_html(game["player1_name"])
+    p2 = escape_html(game["player2_name"])
+    turn_name = p1 if game["current_turn"] == game["player1_id"] else p2
+    turn_token = "🔴" if game["current_turn"] == game["player1_id"] else "🟡"
+
+    return (
+        f"🔴 <b>CONNECT 4 BATTLE</b> 🟡\n\n"
+        f"👤 <b>Player 1 (🔴):</b> {p1}\n"
+        f"👤 <b>Player 2 (🟡):</b> {p2}\n"
+        f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)\n\n"
+        f"{board_str}\n\n"
+        f"👉 <b>Turn:</b> {turn_token} <b>{escape_html(turn_name)}</b>\n"
+        f"<i>Tap column numbers (1-7) below to drop your disk!</i>"
+    )
+
+async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Starts a Connect 4 game vs Bot or another user with Spirit Stones bet."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    chat_id = update.message.chat.id
+
+    args = context.args or []
+    if not args or not args[0].isdigit():
+        await update.message.reply_text(
+            "⚠️ <b>Usage:</b> <code>/join4 &lt;bet_ss&gt;</code>\n"
+            "• Play vs Bot: Type <code>/join4 50</code>\n"
+            "• Play vs User: Reply to someone's message with <code>/join4 50</code>",
+            parse_mode='HTML'
+        )
+        return
+
+    bet = int(args[0])
+    if bet < 10:
+        await update.message.reply_text("❌ Minimum bet for Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
+        return
+
+    eco1 = get_user_economy(user.id)
+    if eco1["spirit_stones"] < bet:
+        await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
+        return
+
+    opponent_id = 0
+    opponent_name = "Sylvi Bot 🤖"
+
+    if update.message.reply_to_message and update.message.reply_to_message.from_user:
+        opp_user = update.message.reply_to_message.from_user
+        if opp_user.id == user.id:
+            await update.message.reply_text("❌ You cannot play against yourself!", parse_mode='HTML')
+            return
+        if opp_user.is_bot:
+            await update.message.reply_text("❌ You cannot challenge bots as a user opponent! (Play vs bot by not replying)", parse_mode='HTML')
+            return
+
+        eco2 = get_user_economy(opp_user.id)
+        if eco2["spirit_stones"] < bet:
+            await update.message.reply_text(f"❌ Opponent <b>{escape_html(opp_user.first_name)}</b> does not have enough Spirit Stones ({bet} SS required)!", parse_mode='HTML')
+            return
+
+        opponent_id = opp_user.id
+        opponent_name = opp_user.first_name
+
+    eco1["spirit_stones"] -= bet
+    save_user_economy(user_economy_db)
+
+    if opponent_id != 0:
+        eco2 = get_user_economy(opponent_id)
+        eco2["spirit_stones"] -= bet
+        save_user_economy(user_economy_db)
+
+    game_state = {
+        "chat_id": chat_id,
+        "player1_id": user.id,
+        "player1_name": user.first_name,
+        "player2_id": opponent_id,
+        "player2_name": opponent_name,
+        "bet": bet,
+        "board": [["⚪️" for _ in range(7)] for _ in range(6)],
+        "current_turn": user.id,
+        "status": "active"
+    }
+    active_connect4_games[chat_id] = game_state
+
+    text = format_connect4_board(game_state)
+    keyboard = build_connect4_keyboard(chat_id)
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
+
+async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.from_user:
+        return
+
+    user = query.from_user
+    chat_id = query.message.chat.id
+    data = query.data or ""
+
+    game = active_connect4_games.get(chat_id)
+    if not game or game["status"] != "active":
+        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4 <bet>.", show_alert=True)
+        return
+
+    if user.id != game["current_turn"]:
+        await query.answer("⏳ It's not your turn!", show_alert=True)
+        return
+
+    col = int(data.replace("c4_col_", ""))
+    token = "🔴" if user.id == game["player1_id"] else "🟡"
+
+    row = drop_token(game["board"], col, token)
+    if row == -1:
+        await query.answer("⚠️ Column is full! Choose another column.", show_alert=True)
+        return
+
+    await query.answer()
+
+    if check_connect4_win(game["board"], token):
+        game["status"] = "finished"
+        active_connect4_games.pop(chat_id, None)
+
+        winner_id = user.id
+        winner_name = user.first_name
+        pot = game["bet"] * 2
+
+        eco = get_user_economy(winner_id)
+        eco["spirit_stones"] += pot
+        save_user_economy(user_economy_db)
+
+        board_str = "\n".join([" ".join(r) for r in game["board"]])
+        text = (
+            f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
+            f"{board_str}\n\n"
+            f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+            f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
+            f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
+        )
+        await query.edit_message_text(text, reply_markup=keyboard if False else None, parse_mode='HTML')
+        return
+
+    if is_board_full(game["board"]):
+        game["status"] = "finished"
+        active_connect4_games.pop(chat_id, None)
+
+        eco1 = get_user_economy(game["player1_id"])
+        eco1["spirit_stones"] += game["bet"]
+        if game["player2_id"] != 0:
+            eco2 = get_user_economy(game["player2_id"])
+            eco2["spirit_stones"] += game["bet"]
+        save_user_economy(user_economy_db)
+
+        board_str = "\n".join([" ".join(r) for r in game["board"]])
+        text = (
+            f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
+            f"{board_str}\n\n"
+            f"<i>Board is full. Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!</i>"
+        )
+        await query.edit_message_text(text, parse_mode='HTML')
+        return
+
+    next_turn = game["player2_id"] if game["current_turn"] == game["player1_id"] else game["player1_id"]
+    game["current_turn"] = next_turn
+
+    if game["status"] == "active" and game["current_turn"] == 0:
+        bot_token = "🟡"
+        valid_cols = [c for c in range(7) if game["board"][0][c] == "⚪️"]
+        if valid_cols:
+            bot_col = random.choice(valid_cols)
+            for c in valid_cols:
+                temp_board = [row[:] for row in game["board"]]
+                if drop_token(temp_board, c, bot_token) != -1 and check_connect4_win(temp_board, bot_token):
+                    bot_col = c
+                    break
+            for c in valid_cols:
+                temp_board = [row[:] for row in game["board"]]
+                if drop_token(temp_board, c, "🔴") != -1 and check_connect4_win(temp_board, "🔴"):
+                    bot_col = c
+                    break
+
+            drop_token(game["board"], bot_col, bot_token)
+
+            if check_connect4_win(game["board"], bot_token):
+                game["status"] = "finished"
+                active_connect4_games.pop(chat_id, None)
+
+                board_str = "\n".join([" ".join(r) for r in game["board"]])
+                text = (
+                    f"🤖 <b>CONNECT 4 - SYLVI BOT WINS!</b> 💀\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n"
+                    f"💸 <b>Bet Lost:</b> <code>-{game['bet']} SS</code>\n\n"
+                    f"<i>Type /join4 &lt;bet&gt; to try again!</i>"
+                )
+                await query.edit_message_text(text, parse_mode='HTML')
+                return
+
+            if is_board_full(game["board"]):
+                game["status"] = "finished"
+                active_connect4_games.pop(chat_id, None)
+
+                eco1 = get_user_economy(game["player1_id"])
+                eco1["spirit_stones"] += game["bet"]
+                save_user_economy(user_economy_db)
+
+                board_str = "\n".join([" ".join(r) for r in game["board"]])
+                text = (
+                    f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
+                    f"{board_str}\n\n"
+                    f"<i>Bet (<code>{game['bet']} SS</code>) refunded!</i>"
+                )
+                await query.edit_message_text(text, parse_mode='HTML')
+                return
+
+            game["current_turn"] = game["player1_id"]
+
+    text = format_connect4_board(game)
+    keyboard = build_connect4_keyboard(chat_id)
+    try:
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+    except Exception:
+        pass
 
 async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Owner command to set the target group chat ID for real-time activity logs."""
@@ -2297,11 +2915,11 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    base_url = os.getenv("RENDER_EXTERNAL_URL") or f"http://127.0.0.1:{os.getenv('PORT', '8080')}"
+    base_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-3-zb94.onrender.com"
     web_app_url = base_url.rstrip("/") + "/"
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
+        [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
     ])
 
     await message.reply_text(
@@ -2310,6 +2928,275 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         reply_markup=keyboard,
         parse_mode='HTML'
     )
+
+# ==================== CONNECT 4 GAME (/JOIN4) ====================
+active_connect4_games: Dict[int, Dict] = {}  # chat_id -> game_state
+
+def check_connect4_win(board, token) -> bool:
+    rows = 6
+    cols = 7
+    # Horizontal
+    for r in range(rows):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r][c+1] == token and board[r][c+2] == token and board[r][c+3] == token:
+                return True
+    # Vertical
+    for r in range(rows - 3):
+        for c in range(cols):
+            if board[r][c] == token and board[r+1][c] == token and board[r+2][c] == token and board[r+3][c] == token:
+                return True
+    # Diagonal positive slope
+    for r in range(rows - 3):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r+1][c+1] == token and board[r+2][c+2] == token and board[r+3][c+3] == token:
+                return True
+    # Diagonal negative slope
+    for r in range(3, rows):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r-1][c+1] == token and board[r-2][c+2] == token and board[r-3][c+3] == token:
+                return True
+    return False
+
+def is_board_full(board) -> bool:
+    return all(board[0][c] != "⚪️" for c in range(7))
+
+def drop_token(board, col, token) -> int:
+    for r in range(5, -1, -1):
+        if board[r][col] == "⚪️":
+            board[r][col] = token
+            return r
+    return -1
+
+def build_connect4_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    row_buttons = []
+    for c in range(7):
+        row_buttons.append(InlineKeyboardButton(f"⬇️ {c+1}", callback_data=f"c4_col_{c}"))
+    return InlineKeyboardMarkup([row_buttons])
+
+def format_connect4_board(game: Dict) -> str:
+    board = game["board"]
+    board_str = "\n".join([" ".join(row) for row in board])
+    p1 = escape_html(game["player1_name"])
+    p2 = escape_html(game["player2_name"])
+    turn_name = p1 if game["current_turn"] == game["player1_id"] else p2
+    turn_token = "🔴" if game["current_turn"] == game["player1_id"] else "🟡"
+
+    return (
+        f"🔴 <b>CONNECT 4 BATTLE</b> 🟡\n\n"
+        f"👤 <b>Player 1 (🔴):</b> {p1}\n"
+        f"👤 <b>Player 2 (🟡):</b> {p2}\n"
+        f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)\n\n"
+        f"{board_str}\n\n"
+        f"👉 <b>Turn:</b> {turn_token} <b>{escape_html(turn_name)}</b>\n"
+        f"<i>Tap column numbers (1-7) below to drop your disk!</i>"
+    )
+
+async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Starts a Connect 4 game vs Bot or another user with Spirit Stones bet."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    chat_id = update.message.chat.id
+
+    args = context.args or []
+    if not args or not args[0].isdigit():
+        await update.message.reply_text(
+            "⚠️ <b>Usage:</b> <code>/join4 &lt;bet_ss&gt;</code>\n"
+            "• Play vs Bot: Type <code>/join4 50</code>\n"
+            "• Play vs User: Reply to someone's message with <code>/join4 50</code>",
+            parse_mode='HTML'
+        )
+        return
+
+    bet = int(args[0])
+    if bet < 10:
+        await update.message.reply_text("❌ Minimum bet for Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
+        return
+
+    eco1 = get_user_economy(user.id)
+    if eco1["spirit_stones"] < bet:
+        await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
+        return
+
+    opponent_id = 0
+    opponent_name = "Sylvi Bot 🤖"
+
+    if update.message.reply_to_message and update.message.reply_to_message.from_user:
+        opp_user = update.message.reply_to_message.from_user
+        if opp_user.id == user.id:
+            await update.message.reply_text("❌ You cannot play against yourself!", parse_mode='HTML')
+            return
+        if opp_user.is_bot:
+            await update.message.reply_text("❌ You cannot challenge bots as a user opponent! (Play vs bot by not replying)", parse_mode='HTML')
+            return
+
+        eco2 = get_user_economy(opp_user.id)
+        if eco2["spirit_stones"] < bet:
+            await update.message.reply_text(f"❌ Opponent <b>{escape_html(opp_user.first_name)}</b> does not have enough Spirit Stones ({bet} SS required)!", parse_mode='HTML')
+            return
+
+        opponent_id = opp_user.id
+        opponent_name = opp_user.first_name
+
+    eco1["spirit_stones"] -= bet
+    save_user_economy(user_economy_db)
+
+    if opponent_id != 0:
+        eco2 = get_user_economy(opponent_id)
+        eco2["spirit_stones"] -= bet
+        save_user_economy(user_economy_db)
+
+    game_state = {
+        "chat_id": chat_id,
+        "player1_id": user.id,
+        "player1_name": user.first_name,
+        "player2_id": opponent_id,
+        "player2_name": opponent_name,
+        "bet": bet,
+        "board": [["⚪️" for _ in range(7)] for _ in range(6)],
+        "current_turn": user.id,
+        "status": "active"
+    }
+    active_connect4_games[chat_id] = game_state
+
+    text = format_connect4_board(game_state)
+    keyboard = build_connect4_keyboard(chat_id)
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
+
+async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.from_user:
+        return
+
+    user = query.from_user
+    chat_id = query.message.chat.id
+    data = query.data or ""
+
+    game = active_connect4_games.get(chat_id)
+    if not game or game["status"] != "active":
+        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4 <bet>.", show_alert=True)
+        return
+
+    if user.id != game["current_turn"]:
+        await query.answer("⏳ It's not your turn!", show_alert=True)
+        return
+
+    col = int(data.replace("c4_col_", ""))
+    token = "🔴" if user.id == game["player1_id"] else "🟡"
+
+    row = drop_token(game["board"], col, token)
+    if row == -1:
+        await query.answer("⚠️ Column is full! Choose another column.", show_alert=True)
+        return
+
+    await query.answer()
+
+    if check_connect4_win(game["board"], token):
+        game["status"] = "finished"
+        active_connect4_games.pop(chat_id, None)
+
+        winner_id = user.id
+        winner_name = user.first_name
+        pot = game["bet"] * 2
+
+        eco = get_user_economy(winner_id)
+        eco["spirit_stones"] += pot
+        save_user_economy(user_economy_db)
+
+        board_str = "\n".join([" ".join(r) for r in game["board"]])
+        text = (
+            f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
+            f"{board_str}\n\n"
+            f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+            f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
+            f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
+        )
+        await query.edit_message_text(text, reply_markup=keyboard if False else None, parse_mode='HTML')
+        return
+
+    if is_board_full(game["board"]):
+        game["status"] = "finished"
+        active_connect4_games.pop(chat_id, None)
+
+        eco1 = get_user_economy(game["player1_id"])
+        eco1["spirit_stones"] += game["bet"]
+        if game["player2_id"] != 0:
+            eco2 = get_user_economy(game["player2_id"])
+            eco2["spirit_stones"] += game["bet"]
+        save_user_economy(user_economy_db)
+
+        board_str = "\n".join([" ".join(r) for r in game["board"]])
+        text = (
+            f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
+            f"{board_str}\n\n"
+            f"<i>Board is full. Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!</i>"
+        )
+        await query.edit_message_text(text, parse_mode='HTML')
+        return
+
+    next_turn = game["player2_id"] if game["current_turn"] == game["player1_id"] else game["player1_id"]
+    game["current_turn"] = next_turn
+
+    if game["status"] == "active" and game["current_turn"] == 0:
+        bot_token = "🟡"
+        valid_cols = [c for c in range(7) if game["board"][0][c] == "⚪️"]
+        if valid_cols:
+            bot_col = random.choice(valid_cols)
+            for c in valid_cols:
+                temp_board = [row[:] for row in game["board"]]
+                if drop_token(temp_board, c, bot_token) != -1 and check_connect4_win(temp_board, bot_token):
+                    bot_col = c
+                    break
+            for c in valid_cols:
+                temp_board = [row[:] for row in game["board"]]
+                if drop_token(temp_board, c, "🔴") != -1 and check_connect4_win(temp_board, "🔴"):
+                    bot_col = c
+                    break
+
+            drop_token(game["board"], bot_col, bot_token)
+
+            if check_connect4_win(game["board"], bot_token):
+                game["status"] = "finished"
+                active_connect4_games.pop(chat_id, None)
+
+                board_str = "\n".join([" ".join(r) for r in game["board"]])
+                text = (
+                    f"🤖 <b>CONNECT 4 - SYLVI BOT WINS!</b> 💀\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n"
+                    f"💸 <b>Bet Lost:</b> <code>-{game['bet']} SS</code>\n\n"
+                    f"<i>Type /join4 &lt;bet&gt; to try again!</i>"
+                )
+                await query.edit_message_text(text, parse_mode='HTML')
+                return
+
+            if is_board_full(game["board"]):
+                game["status"] = "finished"
+                active_connect4_games.pop(chat_id, None)
+
+                eco1 = get_user_economy(game["player1_id"])
+                eco1["spirit_stones"] += game["bet"]
+                save_user_economy(user_economy_db)
+
+                board_str = "\n".join([" ".join(r) for r in game["board"]])
+                text = (
+                    f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
+                    f"{board_str}\n\n"
+                    f"<i>Bet (<code>{game['bet']} SS</code>) refunded!</i>"
+                )
+                await query.edit_message_text(text, parse_mode='HTML')
+                return
+
+            game["current_turn"] = game["player1_id"]
+
+    text = format_connect4_board(game)
+    keyboard = build_connect4_keyboard(chat_id)
+    try:
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+    except Exception:
+        pass
 
 async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Owner command to set the target group chat ID for real-time activity logs."""
@@ -2510,9 +3397,16 @@ async def cultivate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 owner_addcard_sessions: Dict[int, Dict] = {}  # user_id -> {"step": str, "photo": str, "tier": str}
 
 async def finalize_add_card(update: Update, user_id: int, tier: str, char_name: str, photo: str) -> None:
+    used_codes = {str(c.get("code")) for c in cards_pool_db if c.get("code")}
+    while True:
+        card_code = ''.join(random.choices(string.digits, k=4))
+        if card_code not in used_codes:
+            break
+
     card_id = f"CARD_{int(time.time())}"
     new_base_card = {
         "id": card_id,
+        "code": card_code,
         "name": char_name,
         "tier": tier,
         "photo": photo
@@ -2520,7 +3414,7 @@ async def finalize_add_card(update: Update, user_id: int, tier: str, char_name: 
 
     cards_pool_db.append(new_base_card)
     save_cards_pool(cards_pool_db)
-    send_telegram_log(f"➕ New Card Added to Pool by owner: <b>{char_name}</b> [{tier}] (ID: <code>{card_id}</code>)")
+    send_telegram_log(f"➕ New Card Added to Pool by owner: <b>{char_name}</b> [{tier}] (ID: <code>{card_id}</code>, Code: <code>{card_code}</code>)")
 
     tier_emoji = TIER_EMOJIS.get(tier, tier)
 
@@ -2528,7 +3422,8 @@ async def finalize_add_card(update: Update, user_id: int, tier: str, char_name: 
         f"✅ <b>NEW CARD ADDED TO GLOBAL POOL!</b> 🎉\n\n"
         f"⚔️ <b>Character Name:</b> <b>{escape_html(char_name)}</b>\n"
         f"✨ <b>Tier:</b> {tier_emoji}\n"
-        f"🆔 <b>Card Pool ID:</b> <code>{card_id}</code>\n\n"
+        f"🆔 <b>Card Pool ID:</b> <code>{card_id}</code>\n"
+        f"🔑 <b>Assigned Code:</b> <code>{card_code}</code>\n\n"
         f"Total Base Pool Size: <code>{len(cards_pool_db)} cards</code>\n"
         f"💡 <i>This card is now in the global pool and can be recruited by players when summoned/dropped!</i>"
     )
@@ -2552,11 +3447,11 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    base_url = os.getenv("RENDER_EXTERNAL_URL") or f"http://127.0.0.1:{os.getenv('PORT', '8080')}"
+    base_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-3-zb94.onrender.com"
     web_app_url = base_url.rstrip("/") + "/"
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
+        [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
     ])
 
     await message.reply_text(
@@ -2565,6 +3460,275 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         reply_markup=keyboard,
         parse_mode='HTML'
     )
+
+# ==================== CONNECT 4 GAME (/JOIN4) ====================
+active_connect4_games: Dict[int, Dict] = {}  # chat_id -> game_state
+
+def check_connect4_win(board, token) -> bool:
+    rows = 6
+    cols = 7
+    # Horizontal
+    for r in range(rows):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r][c+1] == token and board[r][c+2] == token and board[r][c+3] == token:
+                return True
+    # Vertical
+    for r in range(rows - 3):
+        for c in range(cols):
+            if board[r][c] == token and board[r+1][c] == token and board[r+2][c] == token and board[r+3][c] == token:
+                return True
+    # Diagonal positive slope
+    for r in range(rows - 3):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r+1][c+1] == token and board[r+2][c+2] == token and board[r+3][c+3] == token:
+                return True
+    # Diagonal negative slope
+    for r in range(3, rows):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r-1][c+1] == token and board[r-2][c+2] == token and board[r-3][c+3] == token:
+                return True
+    return False
+
+def is_board_full(board) -> bool:
+    return all(board[0][c] != "⚪️" for c in range(7))
+
+def drop_token(board, col, token) -> int:
+    for r in range(5, -1, -1):
+        if board[r][col] == "⚪️":
+            board[r][col] = token
+            return r
+    return -1
+
+def build_connect4_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    row_buttons = []
+    for c in range(7):
+        row_buttons.append(InlineKeyboardButton(f"⬇️ {c+1}", callback_data=f"c4_col_{c}"))
+    return InlineKeyboardMarkup([row_buttons])
+
+def format_connect4_board(game: Dict) -> str:
+    board = game["board"]
+    board_str = "\n".join([" ".join(row) for row in board])
+    p1 = escape_html(game["player1_name"])
+    p2 = escape_html(game["player2_name"])
+    turn_name = p1 if game["current_turn"] == game["player1_id"] else p2
+    turn_token = "🔴" if game["current_turn"] == game["player1_id"] else "🟡"
+
+    return (
+        f"🔴 <b>CONNECT 4 BATTLE</b> 🟡\n\n"
+        f"👤 <b>Player 1 (🔴):</b> {p1}\n"
+        f"👤 <b>Player 2 (🟡):</b> {p2}\n"
+        f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)\n\n"
+        f"{board_str}\n\n"
+        f"👉 <b>Turn:</b> {turn_token} <b>{escape_html(turn_name)}</b>\n"
+        f"<i>Tap column numbers (1-7) below to drop your disk!</i>"
+    )
+
+async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Starts a Connect 4 game vs Bot or another user with Spirit Stones bet."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    chat_id = update.message.chat.id
+
+    args = context.args or []
+    if not args or not args[0].isdigit():
+        await update.message.reply_text(
+            "⚠️ <b>Usage:</b> <code>/join4 &lt;bet_ss&gt;</code>\n"
+            "• Play vs Bot: Type <code>/join4 50</code>\n"
+            "• Play vs User: Reply to someone's message with <code>/join4 50</code>",
+            parse_mode='HTML'
+        )
+        return
+
+    bet = int(args[0])
+    if bet < 10:
+        await update.message.reply_text("❌ Minimum bet for Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
+        return
+
+    eco1 = get_user_economy(user.id)
+    if eco1["spirit_stones"] < bet:
+        await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
+        return
+
+    opponent_id = 0
+    opponent_name = "Sylvi Bot 🤖"
+
+    if update.message.reply_to_message and update.message.reply_to_message.from_user:
+        opp_user = update.message.reply_to_message.from_user
+        if opp_user.id == user.id:
+            await update.message.reply_text("❌ You cannot play against yourself!", parse_mode='HTML')
+            return
+        if opp_user.is_bot:
+            await update.message.reply_text("❌ You cannot challenge bots as a user opponent! (Play vs bot by not replying)", parse_mode='HTML')
+            return
+
+        eco2 = get_user_economy(opp_user.id)
+        if eco2["spirit_stones"] < bet:
+            await update.message.reply_text(f"❌ Opponent <b>{escape_html(opp_user.first_name)}</b> does not have enough Spirit Stones ({bet} SS required)!", parse_mode='HTML')
+            return
+
+        opponent_id = opp_user.id
+        opponent_name = opp_user.first_name
+
+    eco1["spirit_stones"] -= bet
+    save_user_economy(user_economy_db)
+
+    if opponent_id != 0:
+        eco2 = get_user_economy(opponent_id)
+        eco2["spirit_stones"] -= bet
+        save_user_economy(user_economy_db)
+
+    game_state = {
+        "chat_id": chat_id,
+        "player1_id": user.id,
+        "player1_name": user.first_name,
+        "player2_id": opponent_id,
+        "player2_name": opponent_name,
+        "bet": bet,
+        "board": [["⚪️" for _ in range(7)] for _ in range(6)],
+        "current_turn": user.id,
+        "status": "active"
+    }
+    active_connect4_games[chat_id] = game_state
+
+    text = format_connect4_board(game_state)
+    keyboard = build_connect4_keyboard(chat_id)
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
+
+async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.from_user:
+        return
+
+    user = query.from_user
+    chat_id = query.message.chat.id
+    data = query.data or ""
+
+    game = active_connect4_games.get(chat_id)
+    if not game or game["status"] != "active":
+        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4 <bet>.", show_alert=True)
+        return
+
+    if user.id != game["current_turn"]:
+        await query.answer("⏳ It's not your turn!", show_alert=True)
+        return
+
+    col = int(data.replace("c4_col_", ""))
+    token = "🔴" if user.id == game["player1_id"] else "🟡"
+
+    row = drop_token(game["board"], col, token)
+    if row == -1:
+        await query.answer("⚠️ Column is full! Choose another column.", show_alert=True)
+        return
+
+    await query.answer()
+
+    if check_connect4_win(game["board"], token):
+        game["status"] = "finished"
+        active_connect4_games.pop(chat_id, None)
+
+        winner_id = user.id
+        winner_name = user.first_name
+        pot = game["bet"] * 2
+
+        eco = get_user_economy(winner_id)
+        eco["spirit_stones"] += pot
+        save_user_economy(user_economy_db)
+
+        board_str = "\n".join([" ".join(r) for r in game["board"]])
+        text = (
+            f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
+            f"{board_str}\n\n"
+            f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+            f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
+            f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
+        )
+        await query.edit_message_text(text, reply_markup=keyboard if False else None, parse_mode='HTML')
+        return
+
+    if is_board_full(game["board"]):
+        game["status"] = "finished"
+        active_connect4_games.pop(chat_id, None)
+
+        eco1 = get_user_economy(game["player1_id"])
+        eco1["spirit_stones"] += game["bet"]
+        if game["player2_id"] != 0:
+            eco2 = get_user_economy(game["player2_id"])
+            eco2["spirit_stones"] += game["bet"]
+        save_user_economy(user_economy_db)
+
+        board_str = "\n".join([" ".join(r) for r in game["board"]])
+        text = (
+            f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
+            f"{board_str}\n\n"
+            f"<i>Board is full. Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!</i>"
+        )
+        await query.edit_message_text(text, parse_mode='HTML')
+        return
+
+    next_turn = game["player2_id"] if game["current_turn"] == game["player1_id"] else game["player1_id"]
+    game["current_turn"] = next_turn
+
+    if game["status"] == "active" and game["current_turn"] == 0:
+        bot_token = "🟡"
+        valid_cols = [c for c in range(7) if game["board"][0][c] == "⚪️"]
+        if valid_cols:
+            bot_col = random.choice(valid_cols)
+            for c in valid_cols:
+                temp_board = [row[:] for row in game["board"]]
+                if drop_token(temp_board, c, bot_token) != -1 and check_connect4_win(temp_board, bot_token):
+                    bot_col = c
+                    break
+            for c in valid_cols:
+                temp_board = [row[:] for row in game["board"]]
+                if drop_token(temp_board, c, "🔴") != -1 and check_connect4_win(temp_board, "🔴"):
+                    bot_col = c
+                    break
+
+            drop_token(game["board"], bot_col, bot_token)
+
+            if check_connect4_win(game["board"], bot_token):
+                game["status"] = "finished"
+                active_connect4_games.pop(chat_id, None)
+
+                board_str = "\n".join([" ".join(r) for r in game["board"]])
+                text = (
+                    f"🤖 <b>CONNECT 4 - SYLVI BOT WINS!</b> 💀\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n"
+                    f"💸 <b>Bet Lost:</b> <code>-{game['bet']} SS</code>\n\n"
+                    f"<i>Type /join4 &lt;bet&gt; to try again!</i>"
+                )
+                await query.edit_message_text(text, parse_mode='HTML')
+                return
+
+            if is_board_full(game["board"]):
+                game["status"] = "finished"
+                active_connect4_games.pop(chat_id, None)
+
+                eco1 = get_user_economy(game["player1_id"])
+                eco1["spirit_stones"] += game["bet"]
+                save_user_economy(user_economy_db)
+
+                board_str = "\n".join([" ".join(r) for r in game["board"]])
+                text = (
+                    f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
+                    f"{board_str}\n\n"
+                    f"<i>Bet (<code>{game['bet']} SS</code>) refunded!</i>"
+                )
+                await query.edit_message_text(text, parse_mode='HTML')
+                return
+
+            game["current_turn"] = game["player1_id"]
+
+    text = format_connect4_board(game)
+    keyboard = build_connect4_keyboard(chat_id)
+    try:
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+    except Exception:
+        pass
 
 async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Owner command to set the target group chat ID for real-time activity logs."""
@@ -3028,7 +4192,7 @@ async def buyoffer_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text("❌ Offer expired or not found!", parse_mode='HTML')
         return
 
-    code = offer["code"]
+    code = offer["code"].upper()
     seller_id = offer["seller_id"]
     price = offer["price_ss"]
 
@@ -3036,8 +4200,8 @@ async def buyoffer_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text("❌ You cannot buy your own offer!", parse_mode='HTML')
         return
 
-    card = user_cards_db.get(code)
-    if not card or card.get("owner_id") != seller_id:
+    card = find_user_card_by_code(seller_id, code)
+    if not card:
         active_card_offers.pop(offer_id, None)
         await update.message.reply_text("❌ Card is no longer in seller's roster!", parse_mode='HTML')
         return
@@ -3055,7 +4219,9 @@ async def buyoffer_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     seller_eco["spirit_stones"] += price
     save_user_economy(user_economy_db)
 
+    remove_user_card_by_code(seller_id, code)
     card["owner_id"] = user.id
+    user_cards_db[f"{user.id}_{code}"] = card
     save_user_cards(user_cards_db)
     active_card_offers.pop(offer_id, None)
 
@@ -3238,11 +4404,11 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    base_url = os.getenv("RENDER_EXTERNAL_URL") or f"http://127.0.0.1:{os.getenv('PORT', '8080')}"
+    base_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-3-zb94.onrender.com"
     web_app_url = base_url.rstrip("/") + "/"
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
+        [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
     ])
 
     await message.reply_text(
@@ -3251,6 +4417,275 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         reply_markup=keyboard,
         parse_mode='HTML'
     )
+
+# ==================== CONNECT 4 GAME (/JOIN4) ====================
+active_connect4_games: Dict[int, Dict] = {}  # chat_id -> game_state
+
+def check_connect4_win(board, token) -> bool:
+    rows = 6
+    cols = 7
+    # Horizontal
+    for r in range(rows):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r][c+1] == token and board[r][c+2] == token and board[r][c+3] == token:
+                return True
+    # Vertical
+    for r in range(rows - 3):
+        for c in range(cols):
+            if board[r][c] == token and board[r+1][c] == token and board[r+2][c] == token and board[r+3][c] == token:
+                return True
+    # Diagonal positive slope
+    for r in range(rows - 3):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r+1][c+1] == token and board[r+2][c+2] == token and board[r+3][c+3] == token:
+                return True
+    # Diagonal negative slope
+    for r in range(3, rows):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r-1][c+1] == token and board[r-2][c+2] == token and board[r-3][c+3] == token:
+                return True
+    return False
+
+def is_board_full(board) -> bool:
+    return all(board[0][c] != "⚪️" for c in range(7))
+
+def drop_token(board, col, token) -> int:
+    for r in range(5, -1, -1):
+        if board[r][col] == "⚪️":
+            board[r][col] = token
+            return r
+    return -1
+
+def build_connect4_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    row_buttons = []
+    for c in range(7):
+        row_buttons.append(InlineKeyboardButton(f"⬇️ {c+1}", callback_data=f"c4_col_{c}"))
+    return InlineKeyboardMarkup([row_buttons])
+
+def format_connect4_board(game: Dict) -> str:
+    board = game["board"]
+    board_str = "\n".join([" ".join(row) for row in board])
+    p1 = escape_html(game["player1_name"])
+    p2 = escape_html(game["player2_name"])
+    turn_name = p1 if game["current_turn"] == game["player1_id"] else p2
+    turn_token = "🔴" if game["current_turn"] == game["player1_id"] else "🟡"
+
+    return (
+        f"🔴 <b>CONNECT 4 BATTLE</b> 🟡\n\n"
+        f"👤 <b>Player 1 (🔴):</b> {p1}\n"
+        f"👤 <b>Player 2 (🟡):</b> {p2}\n"
+        f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)\n\n"
+        f"{board_str}\n\n"
+        f"👉 <b>Turn:</b> {turn_token} <b>{escape_html(turn_name)}</b>\n"
+        f"<i>Tap column numbers (1-7) below to drop your disk!</i>"
+    )
+
+async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Starts a Connect 4 game vs Bot or another user with Spirit Stones bet."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    chat_id = update.message.chat.id
+
+    args = context.args or []
+    if not args or not args[0].isdigit():
+        await update.message.reply_text(
+            "⚠️ <b>Usage:</b> <code>/join4 &lt;bet_ss&gt;</code>\n"
+            "• Play vs Bot: Type <code>/join4 50</code>\n"
+            "• Play vs User: Reply to someone's message with <code>/join4 50</code>",
+            parse_mode='HTML'
+        )
+        return
+
+    bet = int(args[0])
+    if bet < 10:
+        await update.message.reply_text("❌ Minimum bet for Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
+        return
+
+    eco1 = get_user_economy(user.id)
+    if eco1["spirit_stones"] < bet:
+        await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
+        return
+
+    opponent_id = 0
+    opponent_name = "Sylvi Bot 🤖"
+
+    if update.message.reply_to_message and update.message.reply_to_message.from_user:
+        opp_user = update.message.reply_to_message.from_user
+        if opp_user.id == user.id:
+            await update.message.reply_text("❌ You cannot play against yourself!", parse_mode='HTML')
+            return
+        if opp_user.is_bot:
+            await update.message.reply_text("❌ You cannot challenge bots as a user opponent! (Play vs bot by not replying)", parse_mode='HTML')
+            return
+
+        eco2 = get_user_economy(opp_user.id)
+        if eco2["spirit_stones"] < bet:
+            await update.message.reply_text(f"❌ Opponent <b>{escape_html(opp_user.first_name)}</b> does not have enough Spirit Stones ({bet} SS required)!", parse_mode='HTML')
+            return
+
+        opponent_id = opp_user.id
+        opponent_name = opp_user.first_name
+
+    eco1["spirit_stones"] -= bet
+    save_user_economy(user_economy_db)
+
+    if opponent_id != 0:
+        eco2 = get_user_economy(opponent_id)
+        eco2["spirit_stones"] -= bet
+        save_user_economy(user_economy_db)
+
+    game_state = {
+        "chat_id": chat_id,
+        "player1_id": user.id,
+        "player1_name": user.first_name,
+        "player2_id": opponent_id,
+        "player2_name": opponent_name,
+        "bet": bet,
+        "board": [["⚪️" for _ in range(7)] for _ in range(6)],
+        "current_turn": user.id,
+        "status": "active"
+    }
+    active_connect4_games[chat_id] = game_state
+
+    text = format_connect4_board(game_state)
+    keyboard = build_connect4_keyboard(chat_id)
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
+
+async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.from_user:
+        return
+
+    user = query.from_user
+    chat_id = query.message.chat.id
+    data = query.data or ""
+
+    game = active_connect4_games.get(chat_id)
+    if not game or game["status"] != "active":
+        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4 <bet>.", show_alert=True)
+        return
+
+    if user.id != game["current_turn"]:
+        await query.answer("⏳ It's not your turn!", show_alert=True)
+        return
+
+    col = int(data.replace("c4_col_", ""))
+    token = "🔴" if user.id == game["player1_id"] else "🟡"
+
+    row = drop_token(game["board"], col, token)
+    if row == -1:
+        await query.answer("⚠️ Column is full! Choose another column.", show_alert=True)
+        return
+
+    await query.answer()
+
+    if check_connect4_win(game["board"], token):
+        game["status"] = "finished"
+        active_connect4_games.pop(chat_id, None)
+
+        winner_id = user.id
+        winner_name = user.first_name
+        pot = game["bet"] * 2
+
+        eco = get_user_economy(winner_id)
+        eco["spirit_stones"] += pot
+        save_user_economy(user_economy_db)
+
+        board_str = "\n".join([" ".join(r) for r in game["board"]])
+        text = (
+            f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
+            f"{board_str}\n\n"
+            f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+            f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
+            f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
+        )
+        await query.edit_message_text(text, reply_markup=keyboard if False else None, parse_mode='HTML')
+        return
+
+    if is_board_full(game["board"]):
+        game["status"] = "finished"
+        active_connect4_games.pop(chat_id, None)
+
+        eco1 = get_user_economy(game["player1_id"])
+        eco1["spirit_stones"] += game["bet"]
+        if game["player2_id"] != 0:
+            eco2 = get_user_economy(game["player2_id"])
+            eco2["spirit_stones"] += game["bet"]
+        save_user_economy(user_economy_db)
+
+        board_str = "\n".join([" ".join(r) for r in game["board"]])
+        text = (
+            f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
+            f"{board_str}\n\n"
+            f"<i>Board is full. Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!</i>"
+        )
+        await query.edit_message_text(text, parse_mode='HTML')
+        return
+
+    next_turn = game["player2_id"] if game["current_turn"] == game["player1_id"] else game["player1_id"]
+    game["current_turn"] = next_turn
+
+    if game["status"] == "active" and game["current_turn"] == 0:
+        bot_token = "🟡"
+        valid_cols = [c for c in range(7) if game["board"][0][c] == "⚪️"]
+        if valid_cols:
+            bot_col = random.choice(valid_cols)
+            for c in valid_cols:
+                temp_board = [row[:] for row in game["board"]]
+                if drop_token(temp_board, c, bot_token) != -1 and check_connect4_win(temp_board, bot_token):
+                    bot_col = c
+                    break
+            for c in valid_cols:
+                temp_board = [row[:] for row in game["board"]]
+                if drop_token(temp_board, c, "🔴") != -1 and check_connect4_win(temp_board, "🔴"):
+                    bot_col = c
+                    break
+
+            drop_token(game["board"], bot_col, bot_token)
+
+            if check_connect4_win(game["board"], bot_token):
+                game["status"] = "finished"
+                active_connect4_games.pop(chat_id, None)
+
+                board_str = "\n".join([" ".join(r) for r in game["board"]])
+                text = (
+                    f"🤖 <b>CONNECT 4 - SYLVI BOT WINS!</b> 💀\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n"
+                    f"💸 <b>Bet Lost:</b> <code>-{game['bet']} SS</code>\n\n"
+                    f"<i>Type /join4 &lt;bet&gt; to try again!</i>"
+                )
+                await query.edit_message_text(text, parse_mode='HTML')
+                return
+
+            if is_board_full(game["board"]):
+                game["status"] = "finished"
+                active_connect4_games.pop(chat_id, None)
+
+                eco1 = get_user_economy(game["player1_id"])
+                eco1["spirit_stones"] += game["bet"]
+                save_user_economy(user_economy_db)
+
+                board_str = "\n".join([" ".join(r) for r in game["board"]])
+                text = (
+                    f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
+                    f"{board_str}\n\n"
+                    f"<i>Bet (<code>{game['bet']} SS</code>) refunded!</i>"
+                )
+                await query.edit_message_text(text, parse_mode='HTML')
+                return
+
+            game["current_turn"] = game["player1_id"]
+
+    text = format_connect4_board(game)
+    keyboard = build_connect4_keyboard(chat_id)
+    try:
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+    except Exception:
+        pass
 
 async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Owner command to set the target group chat ID for real-time activity logs."""
@@ -3462,16 +4897,16 @@ async def discard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     args = context.args or []
     if not args:
         await update.message.reply_text(
-            "⚠️ Usage: <code>/discard &lt;4-digit_code&gt;</code> (e.g. <code>/discard 1234</code>)\n"
+            "⚠️ Usage: <code>/discard &lt;4-digit_code&gt;</code> (e.g. <code>/discard 4444</code>)\n"
             "<i>Note: Discarding a card permanently removes it from your roster and refunds its Worth in Spirit Stones (SS)!</i>",
             parse_mode='HTML'
         )
         return
 
-    code = args[0].strip()
-    card = user_cards_db.get(code)
+    code = args[0].strip().upper()
+    card = find_user_card_by_code(user.id, code)
 
-    if not card or card.get("owner_id") != user.id:
+    if not card:
         await update.message.reply_text(f"❌ Card code <code>{code}</code> was not found in your roster!", parse_mode='HTML')
         return
 
@@ -3480,18 +4915,8 @@ async def discard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     tier_emoji = TIER_EMOJIS.get(tier_name, tier_name)
     worth = get_card_worth(card)
 
-    # Delete card from roster
-    user_cards_db.pop(code, None)
-    db = get_mongo_db()
-    if db is not None:
-        try:
-            db["user_cards"].delete_one({"_id": code})
-        except Exception as e:
-            logger.error(f"Error deleting discarded card {code} from MongoDB: {e}")
+    remove_user_card_by_code(user.id, code)
 
-    save_user_cards(user_cards_db)
-
-    # Add Spirit Stones worth to user economy
     eco = get_user_economy(user.id)
     eco["spirit_stones"] += worth
     save_user_economy(user_economy_db)
@@ -3569,9 +4994,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "• <code>/summon</code> - Summon a recruit drop (Group Chat only, 60m user CD, 1m GC CD).\n"
         "• <code>/recruit</code> / <code>/claim</code> / <code>/grab</code> - Bring dropped card into your crew.\n"
         "• <code>/mycards</code> / <code>/roster</code> - View your owned cards and stay limits.\n"
-        "• <code>/showcard &lt;code&gt;</code> - View card details (Name, Worth, Tier, Stay Time).\n"
+        "• <code>/scard &lt;code&gt;</code> / <code>/showcard</code> - View card details (Name, Worth, Tier, Stay Time).\n"
         "• <code>/discard &lt;code&gt;</code> - Discard a card to receive Spirit Stones (SS) equal to its worth.\n"
-        "• <code>/removecard &lt;code&gt;</code> - Remove/release a card from your crew.\n"
+        "• <code>/rcard &lt;code&gt;</code> / <code>/removecard</code> - Remove/release a card from your crew.\n"
         "• <code>/allcards</code> - View all cards available in the global card pool.\n"
         "• <code>/daily</code> - Claim daily 500 Spirit Stones (SS) + 1 Bonus Mortal Card.\n"
         "• <code>/pillshop</code> - View pills shop to extend stay duration.\n"
@@ -3584,7 +5009,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "📌 <b>General Commands:</b>\n"
         "• <code>/help</code> ya <code>/start</code> - Help menu dekhein.\n"
         "• <code>/statsgc</code> - Group chat stats &amp; memory info dekhein.\n"
-        "• <code>/4words</code> - 4-letter word guessing game (30 tries + hints).\n\n"
+        "• <code>/4words</code> - 4-letter word guessing game (30 tries + hints).\n"
+        "• <code>/join4 &lt;bet_ss&gt;</code> - Connect 4 game (PvP vs user by replying, or vs Bot without reply).\n\n"
         "🔥 <b>AI Assistant Features:</b>\n"
         "• <b>AI Name:</b> Bot ka naam <b>Sylvi</b> hai! Reply karke, <code>@username</code> mention karke, ya <b>Sylvi</b> bolkar baat karein.\n"
     )
@@ -3895,11 +5321,11 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    base_url = os.getenv("RENDER_EXTERNAL_URL") or f"http://127.0.0.1:{os.getenv('PORT', '8080')}"
+    base_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-3-zb94.onrender.com"
     web_app_url = base_url.rstrip("/") + "/"
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚀 Open Cultivation Mini App", web_app=WebAppInfo(url=web_app_url))]
+        [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
     ])
 
     await message.reply_text(
@@ -3908,6 +5334,275 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         reply_markup=keyboard,
         parse_mode='HTML'
     )
+
+# ==================== CONNECT 4 GAME (/JOIN4) ====================
+active_connect4_games: Dict[int, Dict] = {}  # chat_id -> game_state
+
+def check_connect4_win(board, token) -> bool:
+    rows = 6
+    cols = 7
+    # Horizontal
+    for r in range(rows):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r][c+1] == token and board[r][c+2] == token and board[r][c+3] == token:
+                return True
+    # Vertical
+    for r in range(rows - 3):
+        for c in range(cols):
+            if board[r][c] == token and board[r+1][c] == token and board[r+2][c] == token and board[r+3][c] == token:
+                return True
+    # Diagonal positive slope
+    for r in range(rows - 3):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r+1][c+1] == token and board[r+2][c+2] == token and board[r+3][c+3] == token:
+                return True
+    # Diagonal negative slope
+    for r in range(3, rows):
+        for c in range(cols - 3):
+            if board[r][c] == token and board[r-1][c+1] == token and board[r-2][c+2] == token and board[r-3][c+3] == token:
+                return True
+    return False
+
+def is_board_full(board) -> bool:
+    return all(board[0][c] != "⚪️" for c in range(7))
+
+def drop_token(board, col, token) -> int:
+    for r in range(5, -1, -1):
+        if board[r][col] == "⚪️":
+            board[r][col] = token
+            return r
+    return -1
+
+def build_connect4_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    row_buttons = []
+    for c in range(7):
+        row_buttons.append(InlineKeyboardButton(f"⬇️ {c+1}", callback_data=f"c4_col_{c}"))
+    return InlineKeyboardMarkup([row_buttons])
+
+def format_connect4_board(game: Dict) -> str:
+    board = game["board"]
+    board_str = "\n".join([" ".join(row) for row in board])
+    p1 = escape_html(game["player1_name"])
+    p2 = escape_html(game["player2_name"])
+    turn_name = p1 if game["current_turn"] == game["player1_id"] else p2
+    turn_token = "🔴" if game["current_turn"] == game["player1_id"] else "🟡"
+
+    return (
+        f"🔴 <b>CONNECT 4 BATTLE</b> 🟡\n\n"
+        f"👤 <b>Player 1 (🔴):</b> {p1}\n"
+        f"👤 <b>Player 2 (🟡):</b> {p2}\n"
+        f"💰 <b>Pot / Bet:</b> <code>{game['bet'] * 2} SS</code> (<code>{game['bet']} SS</code> each)\n\n"
+        f"{board_str}\n\n"
+        f"👉 <b>Turn:</b> {turn_token} <b>{escape_html(turn_name)}</b>\n"
+        f"<i>Tap column numbers (1-7) below to drop your disk!</i>"
+    )
+
+async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Starts a Connect 4 game vs Bot or another user with Spirit Stones bet."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+    chat_id = update.message.chat.id
+
+    args = context.args or []
+    if not args or not args[0].isdigit():
+        await update.message.reply_text(
+            "⚠️ <b>Usage:</b> <code>/join4 &lt;bet_ss&gt;</code>\n"
+            "• Play vs Bot: Type <code>/join4 50</code>\n"
+            "• Play vs User: Reply to someone's message with <code>/join4 50</code>",
+            parse_mode='HTML'
+        )
+        return
+
+    bet = int(args[0])
+    if bet < 10:
+        await update.message.reply_text("❌ Minimum bet for Connect 4 is <b>10 SS</b>!", parse_mode='HTML')
+        return
+
+    eco1 = get_user_economy(user.id)
+    if eco1["spirit_stones"] < bet:
+        await update.message.reply_text(f"❌ You don't have enough Spirit Stones! Your balance: <code>{eco1['spirit_stones']} SS</code>", parse_mode='HTML')
+        return
+
+    opponent_id = 0
+    opponent_name = "Sylvi Bot 🤖"
+
+    if update.message.reply_to_message and update.message.reply_to_message.from_user:
+        opp_user = update.message.reply_to_message.from_user
+        if opp_user.id == user.id:
+            await update.message.reply_text("❌ You cannot play against yourself!", parse_mode='HTML')
+            return
+        if opp_user.is_bot:
+            await update.message.reply_text("❌ You cannot challenge bots as a user opponent! (Play vs bot by not replying)", parse_mode='HTML')
+            return
+
+        eco2 = get_user_economy(opp_user.id)
+        if eco2["spirit_stones"] < bet:
+            await update.message.reply_text(f"❌ Opponent <b>{escape_html(opp_user.first_name)}</b> does not have enough Spirit Stones ({bet} SS required)!", parse_mode='HTML')
+            return
+
+        opponent_id = opp_user.id
+        opponent_name = opp_user.first_name
+
+    eco1["spirit_stones"] -= bet
+    save_user_economy(user_economy_db)
+
+    if opponent_id != 0:
+        eco2 = get_user_economy(opponent_id)
+        eco2["spirit_stones"] -= bet
+        save_user_economy(user_economy_db)
+
+    game_state = {
+        "chat_id": chat_id,
+        "player1_id": user.id,
+        "player1_name": user.first_name,
+        "player2_id": opponent_id,
+        "player2_name": opponent_name,
+        "bet": bet,
+        "board": [["⚪️" for _ in range(7)] for _ in range(6)],
+        "current_turn": user.id,
+        "status": "active"
+    }
+    active_connect4_games[chat_id] = game_state
+
+    text = format_connect4_board(game_state)
+    keyboard = build_connect4_keyboard(chat_id)
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
+
+async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.from_user:
+        return
+
+    user = query.from_user
+    chat_id = query.message.chat.id
+    data = query.data or ""
+
+    game = active_connect4_games.get(chat_id)
+    if not game or game["status"] != "active":
+        await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4 <bet>.", show_alert=True)
+        return
+
+    if user.id != game["current_turn"]:
+        await query.answer("⏳ It's not your turn!", show_alert=True)
+        return
+
+    col = int(data.replace("c4_col_", ""))
+    token = "🔴" if user.id == game["player1_id"] else "🟡"
+
+    row = drop_token(game["board"], col, token)
+    if row == -1:
+        await query.answer("⚠️ Column is full! Choose another column.", show_alert=True)
+        return
+
+    await query.answer()
+
+    if check_connect4_win(game["board"], token):
+        game["status"] = "finished"
+        active_connect4_games.pop(chat_id, None)
+
+        winner_id = user.id
+        winner_name = user.first_name
+        pot = game["bet"] * 2
+
+        eco = get_user_economy(winner_id)
+        eco["spirit_stones"] += pot
+        save_user_economy(user_economy_db)
+
+        board_str = "\n".join([" ".join(r) for r in game["board"]])
+        text = (
+            f"🏆 <b>CONNECT 4 - WINNER!</b> 🎉\n\n"
+            f"{board_str}\n\n"
+            f"👑 <b>Winner:</b> <b>{escape_html(winner_name)}</b>\n"
+            f"💎 <b>Prize Won:</b> <code>+{pot} SS</code> 💎\n\n"
+            f"<i>Type /join4 &lt;bet&gt; to play again!</i>"
+        )
+        await query.edit_message_text(text, reply_markup=keyboard if False else None, parse_mode='HTML')
+        return
+
+    if is_board_full(game["board"]):
+        game["status"] = "finished"
+        active_connect4_games.pop(chat_id, None)
+
+        eco1 = get_user_economy(game["player1_id"])
+        eco1["spirit_stones"] += game["bet"]
+        if game["player2_id"] != 0:
+            eco2 = get_user_economy(game["player2_id"])
+            eco2["spirit_stones"] += game["bet"]
+        save_user_economy(user_economy_db)
+
+        board_str = "\n".join([" ".join(r) for r in game["board"]])
+        text = (
+            f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
+            f"{board_str}\n\n"
+            f"<i>Board is full. Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!</i>"
+        )
+        await query.edit_message_text(text, parse_mode='HTML')
+        return
+
+    next_turn = game["player2_id"] if game["current_turn"] == game["player1_id"] else game["player1_id"]
+    game["current_turn"] = next_turn
+
+    if game["status"] == "active" and game["current_turn"] == 0:
+        bot_token = "🟡"
+        valid_cols = [c for c in range(7) if game["board"][0][c] == "⚪️"]
+        if valid_cols:
+            bot_col = random.choice(valid_cols)
+            for c in valid_cols:
+                temp_board = [row[:] for row in game["board"]]
+                if drop_token(temp_board, c, bot_token) != -1 and check_connect4_win(temp_board, bot_token):
+                    bot_col = c
+                    break
+            for c in valid_cols:
+                temp_board = [row[:] for row in game["board"]]
+                if drop_token(temp_board, c, "🔴") != -1 and check_connect4_win(temp_board, "🔴"):
+                    bot_col = c
+                    break
+
+            drop_token(game["board"], bot_col, bot_token)
+
+            if check_connect4_win(game["board"], bot_token):
+                game["status"] = "finished"
+                active_connect4_games.pop(chat_id, None)
+
+                board_str = "\n".join([" ".join(r) for r in game["board"]])
+                text = (
+                    f"🤖 <b>CONNECT 4 - SYLVI BOT WINS!</b> 💀\n\n"
+                    f"{board_str}\n\n"
+                    f"👑 <b>Winner:</b> <b>Sylvi Bot 🤖</b>\n"
+                    f"💸 <b>Bet Lost:</b> <code>-{game['bet']} SS</code>\n\n"
+                    f"<i>Type /join4 &lt;bet&gt; to try again!</i>"
+                )
+                await query.edit_message_text(text, parse_mode='HTML')
+                return
+
+            if is_board_full(game["board"]):
+                game["status"] = "finished"
+                active_connect4_games.pop(chat_id, None)
+
+                eco1 = get_user_economy(game["player1_id"])
+                eco1["spirit_stones"] += game["bet"]
+                save_user_economy(user_economy_db)
+
+                board_str = "\n".join([" ".join(r) for r in game["board"]])
+                text = (
+                    f"🤝 <b>CONNECT 4 - IT'S A DRAW!</b> ⚖️\n\n"
+                    f"{board_str}\n\n"
+                    f"<i>Bet (<code>{game['bet']} SS</code>) refunded!</i>"
+                )
+                await query.edit_message_text(text, parse_mode='HTML')
+                return
+
+            game["current_turn"] = game["player1_id"]
+
+    text = format_connect4_board(game)
+    keyboard = build_connect4_keyboard(chat_id)
+    try:
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+    except Exception:
+        pass
 
 async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Owner command to set the target group chat ID for real-time activity logs."""
@@ -4197,41 +5892,43 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         chat_id = message.chat.id
 
         # 100-MESSAGE AUTOMATIC CULTIVATION CARD DROP TRIGGER
-        group_message_counts[chat_id] = group_message_counts.get(chat_id, 0) + 1
-        if group_message_counts[chat_id] >= 100:
-            group_message_counts[chat_id] = 0
-            dropped_tier = roll_card_tier()
-            matching_pool = [c for c in cards_pool_db if c.get("tier", "").lower() == dropped_tier.lower()]
+        if cards_pool_db:
+            group_message_counts[chat_id] = group_message_counts.get(chat_id, 0) + 1
+            if group_message_counts[chat_id] >= 100:
+                group_message_counts[chat_id] = 0
+                dropped_tier = roll_card_tier()
+                matching_pool = [c for c in cards_pool_db if c.get("tier", "").lower() == dropped_tier.lower()]
 
-            if matching_pool:
-                base_card = random.choice(matching_pool)
-                c_name = base_card.get("name", f"{dropped_tier} Cultivator")
+                if matching_pool:
+                    base_card = random.choice(matching_pool)
+                else:
+                    base_card = random.choice(cards_pool_db)
+
+                c_name = base_card.get("name", "Cultivator")
+                dropped_tier = base_card.get("tier", "Mortal")
                 c_photo = base_card.get("photo", "")
-            else:
-                c_name = f"{dropped_tier} Cultivator"
-                c_photo = ""
 
-            active_drops[chat_id] = {
-                "name": c_name,
-                "tier": dropped_tier,
-                "photo": c_photo,
-                "worth": TIER_WORTH.get(dropped_tier, 200)
-            }
+                active_drops[chat_id] = {
+                    "name": c_name,
+                    "tier": dropped_tier,
+                    "photo": c_photo,
+                    "worth": TIER_WORTH.get(dropped_tier, 200)
+                }
 
-            symbol = TIER_SYMBOLS.get(dropped_tier, "⚪️")
-            c_name_esc = escape_html(c_name)
+                symbol = TIER_SYMBOLS.get(dropped_tier, "⚪️")
+                c_name_esc = escape_html(c_name)
 
-            drop_msg = (
-                f"A {dropped_tier} {symbol} recruit {c_name_esc} has appeared...\n\n"
-                f"Use /recruit to bring them into your crew"
-            )
-            if c_photo:
-                try:
-                    await message.reply_photo(photo=c_photo, caption=drop_msg)
-                except Exception:
+                drop_msg = (
+                    f"A {dropped_tier} {symbol} recruit {c_name_esc} has appeared...\n\n"
+                    f"Use /recruit to bring them into your crew"
+                )
+                if c_photo:
+                    try:
+                        await message.reply_photo(photo=c_photo, caption=drop_msg)
+                    except Exception:
+                        await message.reply_text(drop_msg)
+                else:
                     await message.reply_text(drop_msg)
-            else:
-                await message.reply_text(drop_msg)
 
         # 1. CHECK & DELIVER ANY PENDING REMINDERS FOR THIS USER (TARGET WAITING NOTES)
         pending_notes = check_and_get_pending_reminders(chat_id, user)
@@ -4658,15 +6355,16 @@ def main():
     app.add_handler(CommandHandler("mongoexport", mongoexport_command))
     app.add_handler(CommandHandler("mongoimport", mongoimport_command))
     app.add_handler(CommandHandler("4words", fourwords_command))
+    app.add_handler(CommandHandler("join4", join4_command))
 
     # Cultivation Anime Card Command Handlers
     app.add_handler(CommandHandler("summon", summon_command))
     app.add_handler(CommandHandler("mycards", mycards_command))
     app.add_handler(CommandHandler("roster", mycards_command))
-    app.add_handler(CommandHandler("showcard", showcard_command))
+    app.add_handler(CommandHandler(["scard", "showcard"], showcard_command))
     app.add_handler(CommandHandler("search", search_command))
     app.add_handler(CommandHandler("discard", discard_command))
-    app.add_handler(CommandHandler("removecard", removecard_command))
+    app.add_handler(CommandHandler(["rcard", "removecard"], removecard_command))
     app.add_handler(CommandHandler("allcards", allcards_command))
     app.add_handler(CommandHandler("daily", daily_command))
     app.add_handler(CommandHandler("pillshop", pillshop_command))
@@ -4688,6 +6386,7 @@ def main():
 
     # Callback Queries Handler (For /addcard Wizard & Cultivation Inline Buttons)
     app.add_handler(CallbackQueryHandler(addcard_callback_handler, pattern="^addcard_"))
+    app.add_handler(CallbackQueryHandler(connect4_callback_handler, pattern="^c4_col_"))
     app.add_handler(CallbackQueryHandler(pill_cultivate_callback_handler, pattern="^(buy_pill_|cult_|open_pillshop)"))
     app.add_handler(CallbackQueryHandler(mines_callback_handler, pattern="^mines_"))
     app.add_handler(CallbackQueryHandler(mycards_callback_handler, pattern="^mycards_"))
