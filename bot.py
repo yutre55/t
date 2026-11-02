@@ -4990,12 +4990,18 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    web_app_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-xcem.onrender.com"
+    user_id = user.id if user else 5193216992
+    base_web_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-xcem.onrender.com"
+    if base_web_url.endswith("/"):
+        base_web_url = base_web_url[:-1]
+
+    web_app_url = f"{base_web_url}?user_id={user_id}"
+
     chat_type = update.effective_chat.type if update.effective_chat else "private"
     bot_username = context.bot.username if context.bot else ""
 
     if chat_type in ['group', 'supergroup']:
-        app_url = f"https://t.me/{bot_username}?startapp=true" if bot_username else web_app_url
+        app_url = f"https://t.me/{bot_username}?startapp={user_id}" if bot_username else web_app_url
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🌟 OPEN MINI APP", url=app_url)]
         ])
@@ -6044,12 +6050,18 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user:
         track_user_data(user)
 
-    web_app_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-xcem.onrender.com"
+    user_id = user.id if user else 5193216992
+    base_web_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-xcem.onrender.com"
+    if base_web_url.endswith("/"):
+        base_web_url = base_web_url[:-1]
+
+    web_app_url = f"{base_web_url}?user_id={user_id}"
+
     chat_type = update.effective_chat.type if update.effective_chat else "private"
     bot_username = context.bot.username if context.bot else ""
 
     if chat_type in ['group', 'supergroup']:
-        app_url = f"https://t.me/{bot_username}?startapp=true" if bot_username else web_app_url
+        app_url = f"https://t.me/{bot_username}?startapp={user_id}" if bot_username else web_app_url
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🌟 OPEN MINI APP", url=app_url)]
         ])

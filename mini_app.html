@@ -272,12 +272,22 @@
         tg.expand();
 
         let userId = 5193216992; // Default fallback owner ID
-        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+        const urlParams = new URLSearchParams(window.location.search);
+
+        if (urlParams.has('user_id')) {
+            userId = parseInt(urlParams.get('user_id'));
+        } else if (urlParams.has('id')) {
+            userId = parseInt(urlParams.get('id'));
+        } else if (tg.initDataUnsafe && tg.initDataUnsafe.start_param && !isNaN(tg.initDataUnsafe.start_param)) {
+            userId = parseInt(tg.initDataUnsafe.start_param);
+        } else if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
             userId = tg.initDataUnsafe.user.id;
+        }
+
+        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
             const user = tg.initDataUnsafe.user;
-            document.getElementById('user-name').innerText = user.first_name || 'Cultivator';
             if (user.first_name) {
-                document.getElementById('user-avatar').innerText = user.first_name.charAt(0).toUpperCase();
+                document.getElementById('user-name').innerText = user.first_name;
             }
         }
 
@@ -287,6 +297,10 @@
         async function fetchUserData() {
             try {
                 const res = await fetch(`/api/user?user_id=${userId}`);
+                if (!res.ok) {
+                    console.error("HTTP error loading user data:", res.status);
+                    return;
+                }
                 const data = await res.json();
                 appData = data;
                 updateUI();
