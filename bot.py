@@ -661,23 +661,24 @@ def create_card_instance(owner_id: int, forced_tier: Optional[str] = None) -> Di
     tier = forced_tier if forced_tier else roll_card_tier()
     matching_pool = [c for c in cards_pool_db if c.get("tier", "").lower() == tier.lower()]
 
-    if not matching_pool:
-        base_card = {"id": f"DEF_{int(time.time())}", "code": ''.join(random.choices(string.digits, k=4)), "name": f"{tier} Cultivator", "tier": tier, "photo": ""}
-    else:
+    if matching_pool:
         base_card = random.choice(matching_pool)
+    elif cards_pool_db:
+        base_card = random.choice(cards_pool_db)
+    else:
+        base_card = {"id": f"DEF_{int(time.time())}", "code": ''.join(random.choices(string.digits, k=4)), "name": f"Cultivator Hero", "tier": tier, "photo": ""}
 
     code = base_card.get("code")
     if not code:
         code = ''.join(random.choices(string.digits, k=4))
-        base_card["code"] = code
 
     now = time.time()
     worth = TIER_WORTH.get(tier, 200)
     card_data = {
         "code": code,
         "owner_id": owner_id,
-        "name": base_card.get("name", "Unknown Cultivator"),
-        "tier": tier,
+        "name": base_card.get("name", "Cultivator Hero"),
+        "tier": base_card.get("tier", tier),
         "worth": worth,
         "photo": base_card.get("photo", ""),
         "obtained_at": now,
@@ -690,6 +691,25 @@ def create_card_instance(owner_id: int, forced_tier: Optional[str] = None) -> Di
     save_user_cards(user_cards_db)
     logger.info(f"✨ Created Card '{card_data['name']}' [{tier}] Code={code} for User {owner_id}")
     return card_data
+
+def cleanup_dummy_cultivators():
+    dummy_keys = [
+        k for k, c in user_cards_db.items()
+        if "Cultivator" in c.get("name", "") and c.get("name", "") in ["Mortal Cultivator", "Unknown Cultivator", "Awakened Cultivator", "Transcendent Cultivator", "Celestial Cultivator", "Primordial Cultivator", "Cultivator Hero"]
+    ]
+    if dummy_keys:
+        db = get_mongo_db()
+        for k in dummy_keys:
+            user_cards_db.pop(k, None)
+            if db is not None:
+                try:
+                    db["user_cards"].delete_one({"_id": k})
+                except Exception as e:
+                    logger.error(f"Error purging dummy card {k} from MongoDB: {e}")
+        save_user_cards(user_cards_db)
+        logger.info(f"🧹 Purged {len(dummy_keys)} dummy cultivator cards from database.")
+
+cleanup_dummy_cultivators()
 
 PILL_CATALOG = {
     "1": {"name": "Qi Gathering Pill", "seconds": 24 * 3600, "price": 200, "desc": "+1 Day Stay"},
@@ -5380,10 +5400,25 @@ async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     active_drops.pop(chat_id, None)
 
-    claimed_card = create_card_instance(user.id, forced_tier=dropped["tier"])
-    claimed_card["name"] = dropped["name"]
-    claimed_card["photo"] = dropped["photo"]
-    claimed_card["worth"] = dropped.get("worth", TIER_WORTH.get(dropped["tier"], 200))
+    now = time.time()
+    code = dropped.get("code") or ''.join(random.choices(string.digits, k=4))
+    tier = dropped.get("tier", "Mortal")
+    worth = dropped.get("worth", TIER_WORTH.get(tier, 200))
+
+    claimed_card = {
+        "code": code,
+        "owner_id": user.id,
+        "name": dropped["name"],
+        "tier": tier,
+        "worth": worth,
+        "photo": dropped.get("photo", ""),
+        "obtained_at": now,
+        "expire_at": now + (72 * 3600),
+        "is_permanent": False
+    }
+
+    instance_key = f"{user.id}_{code}"
+    user_cards_db[instance_key] = claimed_card
     save_user_cards(user_cards_db)
 
     uname = escape_html(user.first_name)
@@ -6843,6 +6878,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 web_active_mines: Dict[int, Dict] = {}  # user_id -> game_state for web mini app
 
+def build_user_app_data(user_id: int) -> Dict:
+    eco = get_user_economy(user_id)
+    user_cards = [c for c in user_cards_db.values() if c.get("owner_id") == user_id]
+
+    total_pool_count = len(cards_pool_db)
+    owned_card_names = {c.get("name", "").strip().lower() for c in user_cards}
+    unique_owned_count = sum(1 for b in cards_pool_db if b.get("name", "").strip().lower() in owned_card_names) if total_pool_count > 0 else len(owned_card_names)
+    completion_pct = round((unique_owned_count / total_pool_count * 100.0) if total_pool_count > 0 else 0.0, 1)
+
+    cards_list = []
+    for c in user_cards:
+        cards_list.append({
+            "code": c.get("code"),
+            "name": c.get("name"),
+            "tier": c.get("tier"),
+            "worth": get_card_worth(c),
+            "stay_time": format_time_left(c),
+            "photo": c.get("photo", ""),
+            "is_permanent": c.get("is_permanent", False)
+        })
+
+    u_info = users_db.get(str(user_id), {})
+    user_name = u_info.get("first_name") or "Cultivator"
+
+    fav_card = get_user_fav_card(user_id)
+    fav_photo = fav_card.get("photo", "") if fav_card else ""
+    fav_card_name = fav_card.get("name", "") if fav_card else ""
+    fav_card_tier = fav_card.get("tier", "") if fav_card else ""
+
+    return {
+        "user_name": user_name,
+        "spirit_stones": eco["spirit_stones"],
+        "pills": eco.get("pills", {}),
+        "pill_catalog": PILL_CATALOG,
+        "roster_count": len(user_cards),
+        "unique_collected": unique_owned_count,
+        "total_pool": total_pool_count,
+        "completion_pct": completion_pct,
+        "user_cards": cards_list,
+        "fav_card_photo": fav_photo,
+        "fav_card_name": fav_card_name,
+        "fav_card_tier": fav_card_tier
+    }
+
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(200)
@@ -6878,55 +6957,18 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             except ValueError:
                 user_id = 5193216992
 
-            eco = get_user_economy(user_id)
-            user_cards = [c for c in user_cards_db.values() if c.get("owner_id") == user_id]
-
-            total_pool_count = len(cards_pool_db)
-            owned_card_names = {c.get("name", "").strip().lower() for c in user_cards}
-            unique_owned_count = sum(1 for b in cards_pool_db if b.get("name", "").strip().lower() in owned_card_names) if total_pool_count > 0 else len(owned_card_names)
-            completion_pct = round((unique_owned_count / total_pool_count * 100.0) if total_pool_count > 0 else 0.0, 1)
-
-            cards_list = []
-            for c in user_cards:
-                cards_list.append({
-                    "code": c.get("code"),
-                    "name": c.get("name"),
-                    "tier": c.get("tier"),
-                    "worth": get_card_worth(c),
-                    "stay_time": format_time_left(c)
-                })
-
-            u_info = users_db.get(str(user_id), {})
-            user_name = u_info.get("first_name") or "Cultivator"
-
-            fav_card = get_user_fav_card(user_id)
-            fav_photo = fav_card.get("photo", "") if fav_card else ""
-            fav_card_name = fav_card.get("name", "") if fav_card else ""
-            fav_card_tier = fav_card.get("tier", "") if fav_card else ""
-
-            data = {
-                "user_name": user_name,
-                "spirit_stones": eco["spirit_stones"],
-                "pills": eco.get("pills", {}),
-                "pill_catalog": PILL_CATALOG,
-                "roster_count": len(user_cards),
-                "unique_collected": unique_owned_count,
-                "total_pool": total_pool_count,
-                "completion_pct": completion_pct,
-                "user_cards": cards_list,
-                "fav_card_photo": fav_photo,
-                "fav_card_name": fav_card_name,
-                "fav_card_tier": fav_card_tier
-            }
+            data = build_user_app_data(user_id)
 
             self.send_response(200)
             self.send_header("Content-type", "application/json; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(data).encode("utf-8"))
             return
 
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(b"OK - Sylvi Groq AI Bot is running")
 
@@ -6959,29 +7001,12 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                     eco["spirit_stones"] -= price
                     eco["pills"][pill_name] = eco["pills"].get(pill_name, 0) + 1
                     save_user_economy(user_economy_db)
-
-                    user_cards = [c for c in user_cards_db.values() if c.get("owner_id") == user_id]
-                    total_pool_count = len(cards_pool_db)
-                    owned_card_names = {c.get("name", "").strip().lower() for c in user_cards}
-                    unique_owned_count = sum(1 for b in cards_pool_db if b.get("name", "").strip().lower() in owned_card_names) if total_pool_count > 0 else len(owned_card_names)
-                    completion_pct = round((unique_owned_count / total_pool_count * 100.0) if total_pool_count > 0 else 0.0, 1)
-
-                    cards_list = [{"code": c.get("code"), "name": c.get("name"), "tier": c.get("tier"), "worth": get_card_worth(c), "stay_time": format_time_left(c)} for c in user_cards]
-
-                    app_data = {
-                        "spirit_stones": eco["spirit_stones"],
-                        "pills": eco.get("pills", {}),
-                        "pill_catalog": PILL_CATALOG,
-                        "roster_count": len(user_cards),
-                        "unique_collected": unique_owned_count,
-                        "total_pool": total_pool_count,
-                        "completion_pct": completion_pct,
-                        "user_cards": cards_list
-                    }
+                    app_data = build_user_app_data(user_id)
                     response = {"success": True, "pill_name": pill_name, "app_data": app_data}
 
             self.send_response(200)
             self.send_header("Content-type", "application/json; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(response).encode("utf-8"))
             return
@@ -7008,29 +7033,12 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                     save_user_economy(user_economy_db)
 
                     mortal_card = create_card_instance(user_id, forced_tier="Mortal")
-
-                    user_cards = [c for c in user_cards_db.values() if c.get("owner_id") == user_id]
-                    total_pool_count = len(cards_pool_db)
-                    owned_card_names = {c.get("name", "").strip().lower() for c in user_cards}
-                    unique_owned_count = sum(1 for b in cards_pool_db if b.get("name", "").strip().lower() in owned_card_names) if total_pool_count > 0 else len(owned_card_names)
-                    completion_pct = round((unique_owned_count / total_pool_count * 100.0) if total_pool_count > 0 else 0.0, 1)
-
-                    cards_list = [{"code": c.get("code"), "name": c.get("name"), "tier": c.get("tier"), "worth": get_card_worth(c), "stay_time": format_time_left(c)} for c in user_cards]
-
-                    app_data = {
-                        "spirit_stones": eco["spirit_stones"],
-                        "pills": eco.get("pills", {}),
-                        "pill_catalog": PILL_CATALOG,
-                        "roster_count": len(user_cards),
-                        "unique_collected": unique_owned_count,
-                        "total_pool": total_pool_count,
-                        "completion_pct": completion_pct,
-                        "user_cards": cards_list
-                    }
+                    app_data = build_user_app_data(user_id)
                     response = {"success": True, "message": f"💎 Daily Claimed! +500 SS & Mortal Card ({mortal_card['name']})", "app_data": app_data}
 
             self.send_response(200)
             self.send_header("Content-type", "application/json; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(response).encode("utf-8"))
             return
