@@ -4971,10 +4971,18 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         track_user_data(user)
 
     web_app_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-xcem.onrender.com"
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    bot_username = context.bot.username if context.bot else ""
 
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
-    ])
+    if chat_type in ['group', 'supergroup']:
+        app_url = f"https://t.me/{bot_username}?startapp=true" if bot_username else web_app_url
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🌟 OPEN MINI APP", url=app_url)]
+        ])
+    else:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
+        ])
 
     await message.reply_text(
         "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"
@@ -6002,10 +6010,18 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         track_user_data(user)
 
     web_app_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-xcem.onrender.com"
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    bot_username = context.bot.username if context.bot else ""
 
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
-    ])
+    if chat_type in ['group', 'supergroup']:
+        app_url = f"https://t.me/{bot_username}?startapp=true" if bot_username else web_app_url
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🌟 OPEN MINI APP", url=app_url)]
+        ])
+    else:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("OPEN MINI APP", web_app=WebAppInfo(url=web_app_url))]
+        ])
 
     await message.reply_text(
         "🌟 <b>CULTIVATION CULT TELEGRAM MINI APP</b> ⛩️\n\n"

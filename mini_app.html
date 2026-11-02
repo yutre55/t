@@ -222,9 +222,24 @@
         <!-- TAB 4: ROSTER -->
         <section id="tab-roster" class="tab-content space-y-4 hidden">
             <div class="glass-3d rounded-3xl p-4 shadow-xl">
-                <h3 class="text-sm font-bold text-slate-100 mb-3">📜 Your Cultivation Crew</h3>
-                <div id="roster-list" class="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
-                    <!-- Loaded dynamically -->
+                <h3 class="text-sm font-bold text-slate-100 mb-3 flex items-center justify-between">
+                    <span>📜 Your Cultivation Crew</span>
+                    <span id="roster-filter-title" class="text-xs font-extrabold text-purple-400">All</span>
+                </h3>
+
+                <!-- Tier Filter Pills Bar -->
+                <div class="flex space-x-2 overflow-x-auto pb-2 text-[11px] font-bold no-scrollbar">
+                    <button onclick="filterRoster('All')" id="pill-filter-All" class="tier-pill-btn active px-3 py-1.5 rounded-full bg-purple-600 text-white shadow whitespace-nowrap">All</button>
+                    <button onclick="filterRoster('Primordial')" id="pill-filter-Primordial" class="tier-pill-btn px-3 py-1.5 rounded-full bg-slate-900 border border-slate-700 text-slate-300 whitespace-nowrap">Primordial 🔥</button>
+                    <button onclick="filterRoster('Celestial')" id="pill-filter-Celestial" class="tier-pill-btn px-3 py-1.5 rounded-full bg-slate-900 border border-slate-700 text-slate-300 whitespace-nowrap">Celestial 🔮</button>
+                    <button onclick="filterRoster('Transcendent')" id="pill-filter-Transcendent" class="tier-pill-btn px-3 py-1.5 rounded-full bg-slate-900 border border-slate-700 text-slate-300 whitespace-nowrap">Transcendent 🔵</button>
+                    <button onclick="filterRoster('Awakened')" id="pill-filter-Awakened" class="tier-pill-btn px-3 py-1.5 rounded-full bg-slate-900 border border-slate-700 text-slate-300 whitespace-nowrap">Awakened 🟢</button>
+                    <button onclick="filterRoster('Mortal')" id="pill-filter-Mortal" class="tier-pill-btn px-3 py-1.5 rounded-full bg-slate-900 border border-slate-700 text-slate-300 whitespace-nowrap">Mortal ⚪</button>
+                </div>
+
+                <!-- 3-Column Card Grid (Matching Screenshot) -->
+                <div id="roster-grid" class="grid grid-cols-3 gap-2.5 pt-2 max-h-[60vh] overflow-y-auto pr-1">
+                    <!-- Cards loaded dynamically -->
                 </div>
             </div>
         </section>
@@ -280,6 +295,69 @@
             }
         }
 
+        let currentRosterFilter = 'All';
+
+        function filterRoster(tier) {
+            currentRosterFilter = tier;
+            const filterTitle = document.getElementById('roster-filter-title');
+            if (filterTitle) filterTitle.innerText = tier;
+
+            document.querySelectorAll('.tier-pill-btn').forEach(btn => {
+                btn.classList.remove('bg-purple-600', 'text-white');
+                btn.classList.add('bg-slate-900', 'border', 'border-slate-700', 'text-slate-300');
+            });
+            const activePill = document.getElementById(`pill-filter-${tier}`);
+            if (activePill) {
+                activePill.classList.remove('bg-slate-900', 'border', 'border-slate-700', 'text-slate-300');
+                activePill.classList.add('bg-purple-600', 'text-white');
+            }
+            renderRosterGrid();
+        }
+
+        function renderRosterGrid() {
+            const gridEl = document.getElementById('roster-grid');
+            if (!gridEl || !appData || !appData.user_cards) return;
+            gridEl.innerHTML = '';
+
+            let filtered = appData.user_cards;
+            if (currentRosterFilter !== 'All') {
+                filtered = filtered.filter(c => c.tier && c.tier.toLowerCase() === currentRosterFilter.toLowerCase());
+            }
+
+            if (filtered.length === 0) {
+                gridEl.innerHTML = `<div class="col-span-3 text-center text-xs text-slate-400 py-8">No cards found in ${currentRosterFilter} tier.</div>`;
+                return;
+            }
+
+            filtered.forEach(c => {
+                const isPerm = c.is_permanent;
+                const permBadge = isPerm ? `<div class="absolute top-1.5 left-1.5 bg-amber-500/90 text-black text-[9px] font-black px-1.5 py-0.5 rounded-md shadow z-10">🏋️</div>` : '';
+
+                let imgHtml = '';
+                if (c.photo && (c.photo.startsWith('http://') || c.photo.startsWith('https://'))) {
+                    imgHtml = `<img src="${c.photo}" class="w-full h-28 object-cover rounded-t-xl" alt="${c.name}">`;
+                } else {
+                    imgHtml = `<div class="w-full h-28 bg-purple-950/70 rounded-t-xl flex items-center justify-center text-purple-400 text-3xl font-bold opacity-75">👁️</div>`;
+                }
+
+                gridEl.innerHTML += `
+                    <div class="card-3d rounded-2xl border border-purple-500/30 overflow-hidden relative flex flex-col justify-between shadow-lg hover:scale-105 transition duration-200">
+                        ${permBadge}
+                        <div class="relative">
+                            ${imgHtml}
+                        </div>
+                        <div class="p-2 bg-slate-900/95 flex flex-col justify-between flex-grow">
+                            <span class="font-bold text-white text-[11px] leading-snug line-clamp-2">${c.name}</span>
+                            <div class="mt-1.5 flex items-center justify-between text-[9px] text-purple-300 font-bold">
+                                <span>${c.tier}</span>
+                                <span class="text-amber-400 font-extrabold">• ${c.code}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
         function updateUI() {
             if (!appData) return;
             document.getElementById('header-ss').innerText = `${appData.spirit_stones} SS`;
@@ -316,42 +394,27 @@
 
             // Shop Catalog
             const catalogEl = document.getElementById('shop-catalog');
-            catalogEl.innerHTML = '';
-            for (const [num, item] of Object.entries(appData.pill_catalog)) {
-                const owned = appData.pills[item.name] || 0;
-                catalogEl.innerHTML += `
-                    <div class="card-3d p-3.5 rounded-2xl border border-purple-500/20 flex justify-between items-center shadow-lg">
-                        <div>
-                            <span class="block text-xs font-bold text-white">${item.name}</span>
-                            <span class="text-[10px] text-slate-400">${item.desc}</span>
-                            <span class="block text-[11px] font-extrabold text-amber-400 mt-1">💎 ${item.price} SS (Owned: ${owned})</span>
-                        </div>
-                        <button onclick="buyPill('${num}')" class="btn-3d font-bold px-4 py-2.5 rounded-xl text-xs text-white tracking-wide shadow-md">
-                            Buy
-                        </button>
-                    </div>
-                `;
-            }
-
-            // Roster List
-            const rosterEl = document.getElementById('roster-list');
-            rosterEl.innerHTML = '';
-            if (appData.user_cards.length === 0) {
-                rosterEl.innerHTML = `<p class="text-xs text-slate-400 text-center py-4">Your roster is empty. Use /summon in group chat!</p>`;
-            } else {
-                appData.user_cards.forEach(c => {
-                    rosterEl.innerHTML += `
-                        <div class="card-3d p-3.5 rounded-2xl border border-purple-500/20 flex justify-between items-center text-xs shadow-lg">
+            if (catalogEl && appData.pill_catalog) {
+                catalogEl.innerHTML = '';
+                for (const [num, item] of Object.entries(appData.pill_catalog)) {
+                    const owned = (appData.pills && appData.pills[item.name]) ? appData.pills[item.name] : 0;
+                    catalogEl.innerHTML += `
+                        <div class="card-3d p-3.5 rounded-2xl border border-purple-500/20 flex justify-between items-center shadow-lg">
                             <div>
-                                <span class="font-bold text-white text-sm">${c.name}</span>
-                                <span class="block text-[10px] text-purple-300 mt-0.5">${c.tier} | 💎 ${c.worth} SS</span>
-                                <span class="block text-[10px] text-slate-400 mt-0.5">Code: ${c.code}</span>
+                                <span class="block text-xs font-bold text-white">${item.name}</span>
+                                <span class="text-[10px] text-slate-400">${item.desc}</span>
+                                <span class="block text-[11px] font-extrabold text-amber-400 mt-1">💎 ${item.price} SS (Owned: ${owned})</span>
                             </div>
-                            <span class="text-[10px] bg-slate-900/90 border border-purple-500/40 px-2.5 py-1 rounded-lg text-emerald-400 font-bold shadow-inner">${c.stay_time}</span>
+                            <button onclick="buyPill('${num}')" class="btn-3d font-bold px-4 py-2.5 rounded-xl text-xs text-white tracking-wide shadow-md">
+                                Buy
+                            </button>
                         </div>
                     `;
-                });
+                }
             }
+
+            // Render Roster Cards Grid
+            renderRosterGrid();
         }
 
         async function buyPill(num) {
@@ -496,8 +559,26 @@
             }
         }
 
+        function playTicSound() {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.05);
+                gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.05);
+            } catch(e) {}
+        }
+
         async function clickTile(idx) {
             if (!activeMines || activeMines.game_over) return;
+            playTicSound();
             try {
                 const res = await fetch('/api/mine/click', {
                     method: 'POST',
