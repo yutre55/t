@@ -1414,6 +1414,20 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     else:
         bet = 0
 
+    now = time.time()
+    existing_c4 = active_connect4_games.get(chat_id)
+    if existing_c4 and existing_c4.get("status") == "active":
+        c4_start = existing_c4.get("start_time", 0.0)
+        if now - c4_start < 300:  # 5 minutes
+            await update.message.reply_text(
+                "⏳ <b>Connect 4 Game Already Active!</b>\n"
+                "A game is already in progress in this chat. Finish it or wait for the 5-minute inactivity timeout.",
+                parse_mode='HTML'
+            )
+            return
+        else:
+            active_connect4_games.pop(chat_id, None)
+
     game_state = {
         "chat_id": chat_id,
         "player1_id": user.id,
@@ -1423,7 +1437,8 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "bet": bet,
         "board": [["⚪️" for _ in range(7)] for _ in range(6)],
         "current_turn": user.id,
-        "status": "active"
+        "status": "active",
+        "start_time": now
     }
     active_connect4_games[chat_id] = game_state
 
@@ -1440,9 +1455,23 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
     chat_id = query.message.chat.id
     data = query.data or ""
 
+    now = time.time()
     game = active_connect4_games.get(chat_id)
     if not game or game["status"] != "active":
         await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4.", show_alert=True)
+        return
+
+    # Check 5-minute expiration
+    if now - game.get("start_time", 0.0) > 300:
+        active_connect4_games.pop(chat_id, None)
+        await query.answer("⏳ Connect 4 game expired due to 5 minutes of inactivity!", show_alert=True)
+        try:
+            await query.edit_message_text(
+                "⏳ <b>CONNECT 4 BATTLE EXPIRED!</b>\n\n<i>Game ended due to 5 minutes of inactivity. Type /join4 to start a new game!</i>",
+                parse_mode='HTML'
+            )
+        except Exception:
+            pass
         return
 
     if user.id != game["current_turn"]:
@@ -1683,6 +1712,20 @@ async def summon_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_id = user.id
     chat_id = update.message.chat.id
 
+    # Check if an active recruit is ALREADY waiting in this chat
+    existing_drop = active_drops.get(chat_id)
+    if existing_drop:
+        summoned_at = existing_drop.get("summoned_at", 0.0)
+        if now - summoned_at < 600:  # 10 minutes = 600 seconds
+            await update.message.reply_text(
+                "⏳ There's already a recruit waiting there! Wait for someone to /recruit them or for them to walk off.",
+                parse_mode='HTML'
+            )
+            return
+        else:
+            # 10 minutes passed, recruit walked off!
+            active_drops.pop(chat_id, None)
+
     # 1. Check per-user 60-min cooldown (3600 seconds)
     last_user_summon = user_summon_cooldowns.get(user_id, 0.0)
     user_diff = now - last_user_summon
@@ -1736,7 +1779,9 @@ async def summon_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "name": c_name,
         "tier": dropped_tier,
         "photo": c_photo,
-        "worth": TIER_WORTH.get(dropped_tier, 200)
+        "worth": TIER_WORTH.get(dropped_tier, 200),
+        "code": base_card.get("code"),
+        "summoned_at": now
     }
 
     symbol = TIER_SYMBOLS.get(dropped_tier, "⚪️")
@@ -2292,6 +2337,20 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     else:
         bet = 0
 
+    now = time.time()
+    existing_c4 = active_connect4_games.get(chat_id)
+    if existing_c4 and existing_c4.get("status") == "active":
+        c4_start = existing_c4.get("start_time", 0.0)
+        if now - c4_start < 300:  # 5 minutes
+            await update.message.reply_text(
+                "⏳ <b>Connect 4 Game Already Active!</b>\n"
+                "A game is already in progress in this chat. Finish it or wait for the 5-minute inactivity timeout.",
+                parse_mode='HTML'
+            )
+            return
+        else:
+            active_connect4_games.pop(chat_id, None)
+
     game_state = {
         "chat_id": chat_id,
         "player1_id": user.id,
@@ -2301,7 +2360,8 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "bet": bet,
         "board": [["⚪️" for _ in range(7)] for _ in range(6)],
         "current_turn": user.id,
-        "status": "active"
+        "status": "active",
+        "start_time": now
     }
     active_connect4_games[chat_id] = game_state
 
@@ -2318,9 +2378,23 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
     chat_id = query.message.chat.id
     data = query.data or ""
 
+    now = time.time()
     game = active_connect4_games.get(chat_id)
     if not game or game["status"] != "active":
         await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4.", show_alert=True)
+        return
+
+    # Check 5-minute expiration
+    if now - game.get("start_time", 0.0) > 300:
+        active_connect4_games.pop(chat_id, None)
+        await query.answer("⏳ Connect 4 game expired due to 5 minutes of inactivity!", show_alert=True)
+        try:
+            await query.edit_message_text(
+                "⏳ <b>CONNECT 4 BATTLE EXPIRED!</b>\n\n<i>Game ended due to 5 minutes of inactivity. Type /join4 to start a new game!</i>",
+                parse_mode='HTML'
+            )
+        except Exception:
+            pass
         return
 
     if user.id != game["current_turn"]:
@@ -2926,6 +3000,20 @@ async def mine_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("❌ Mines count must be between <b>1 and 24</b>!", parse_mode='HTML')
         return
 
+    now = time.time()
+    existing_mine = active_mines_games.get(user.id)
+    if existing_mine and not existing_mine.get("game_over", False):
+        mine_start = existing_mine.get("start_time", 0.0)
+        if now - mine_start < 300:  # 5 minutes
+            await update.message.reply_text(
+                "⏳ <b>Active Mines Game Exists!</b>\n"
+                "You already have an active Mines game. Please cash out or complete it before starting a new one!",
+                parse_mode='HTML'
+            )
+            return
+        else:
+            active_mines_games.pop(user.id, None)
+
     # Deduct bet
     eco["spirit_stones"] -= bet
     save_user_economy(user_economy_db)
@@ -2940,7 +3028,8 @@ async def mine_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "revealed": set(),
         "tiles_opened": 0,
         "game_over": False,
-        "cashed_out": False
+        "cashed_out": False,
+        "start_time": now
     }
     active_mines_games[user.id] = game_state
 
@@ -3015,6 +3104,19 @@ async def mines_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     if not game_state:
         await query.answer("⚠️ No active Mines game found! Type /mine <bet> <mines> to start a new game.", show_alert=True)
+        return
+
+    now = time.time()
+    if now - game_state.get("start_time", 0.0) > 300:  # 5 minutes
+        active_mines_games.pop(user_id, None)
+        await query.answer("⏳ Mines game expired due to 5 minutes of inactivity!", show_alert=True)
+        try:
+            await query.edit_message_text(
+                "⏳ <b>MINES GAME EXPIRED!</b>\n\n<i>Game ended due to 5 minutes of inactivity. Type /mine &lt;bet&gt; &lt;mines&gt; to start a new game!</i>",
+                parse_mode='HTML'
+            )
+        except Exception:
+            pass
         return
 
     uname = escape_html(user.first_name)
@@ -3344,6 +3446,20 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     else:
         bet = 0
 
+    now = time.time()
+    existing_c4 = active_connect4_games.get(chat_id)
+    if existing_c4 and existing_c4.get("status") == "active":
+        c4_start = existing_c4.get("start_time", 0.0)
+        if now - c4_start < 300:  # 5 minutes
+            await update.message.reply_text(
+                "⏳ <b>Connect 4 Game Already Active!</b>\n"
+                "A game is already in progress in this chat. Finish it or wait for the 5-minute inactivity timeout.",
+                parse_mode='HTML'
+            )
+            return
+        else:
+            active_connect4_games.pop(chat_id, None)
+
     game_state = {
         "chat_id": chat_id,
         "player1_id": user.id,
@@ -3353,7 +3469,8 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "bet": bet,
         "board": [["⚪️" for _ in range(7)] for _ in range(6)],
         "current_turn": user.id,
-        "status": "active"
+        "status": "active",
+        "start_time": now
     }
     active_connect4_games[chat_id] = game_state
 
@@ -3370,9 +3487,23 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
     chat_id = query.message.chat.id
     data = query.data or ""
 
+    now = time.time()
     game = active_connect4_games.get(chat_id)
     if not game or game["status"] != "active":
         await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4.", show_alert=True)
+        return
+
+    # Check 5-minute expiration
+    if now - game.get("start_time", 0.0) > 300:
+        active_connect4_games.pop(chat_id, None)
+        await query.answer("⏳ Connect 4 game expired due to 5 minutes of inactivity!", show_alert=True)
+        try:
+            await query.edit_message_text(
+                "⏳ <b>CONNECT 4 BATTLE EXPIRED!</b>\n\n<i>Game ended due to 5 minutes of inactivity. Type /join4 to start a new game!</i>",
+                parse_mode='HTML'
+            )
+        except Exception:
+            pass
         return
 
     if user.id != game["current_turn"]:
@@ -4116,6 +4247,20 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     else:
         bet = 0
 
+    now = time.time()
+    existing_c4 = active_connect4_games.get(chat_id)
+    if existing_c4 and existing_c4.get("status") == "active":
+        c4_start = existing_c4.get("start_time", 0.0)
+        if now - c4_start < 300:  # 5 minutes
+            await update.message.reply_text(
+                "⏳ <b>Connect 4 Game Already Active!</b>\n"
+                "A game is already in progress in this chat. Finish it or wait for the 5-minute inactivity timeout.",
+                parse_mode='HTML'
+            )
+            return
+        else:
+            active_connect4_games.pop(chat_id, None)
+
     game_state = {
         "chat_id": chat_id,
         "player1_id": user.id,
@@ -4125,7 +4270,8 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "bet": bet,
         "board": [["⚪️" for _ in range(7)] for _ in range(6)],
         "current_turn": user.id,
-        "status": "active"
+        "status": "active",
+        "start_time": now
     }
     active_connect4_games[chat_id] = game_state
 
@@ -4142,9 +4288,23 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
     chat_id = query.message.chat.id
     data = query.data or ""
 
+    now = time.time()
     game = active_connect4_games.get(chat_id)
     if not game or game["status"] != "active":
         await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4.", show_alert=True)
+        return
+
+    # Check 5-minute expiration
+    if now - game.get("start_time", 0.0) > 300:
+        active_connect4_games.pop(chat_id, None)
+        await query.answer("⏳ Connect 4 game expired due to 5 minutes of inactivity!", show_alert=True)
+        try:
+            await query.edit_message_text(
+                "⏳ <b>CONNECT 4 BATTLE EXPIRED!</b>\n\n<i>Game ended due to 5 minutes of inactivity. Type /join4 to start a new game!</i>",
+                parse_mode='HTML'
+            )
+        except Exception:
+            pass
         return
 
     if user.id != game["current_turn"]:
@@ -5139,6 +5299,20 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     else:
         bet = 0
 
+    now = time.time()
+    existing_c4 = active_connect4_games.get(chat_id)
+    if existing_c4 and existing_c4.get("status") == "active":
+        c4_start = existing_c4.get("start_time", 0.0)
+        if now - c4_start < 300:  # 5 minutes
+            await update.message.reply_text(
+                "⏳ <b>Connect 4 Game Already Active!</b>\n"
+                "A game is already in progress in this chat. Finish it or wait for the 5-minute inactivity timeout.",
+                parse_mode='HTML'
+            )
+            return
+        else:
+            active_connect4_games.pop(chat_id, None)
+
     game_state = {
         "chat_id": chat_id,
         "player1_id": user.id,
@@ -5148,7 +5322,8 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "bet": bet,
         "board": [["⚪️" for _ in range(7)] for _ in range(6)],
         "current_turn": user.id,
-        "status": "active"
+        "status": "active",
+        "start_time": now
     }
     active_connect4_games[chat_id] = game_state
 
@@ -5165,9 +5340,23 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
     chat_id = query.message.chat.id
     data = query.data or ""
 
+    now = time.time()
     game = active_connect4_games.get(chat_id)
     if not game or game["status"] != "active":
         await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4.", show_alert=True)
+        return
+
+    # Check 5-minute expiration
+    if now - game.get("start_time", 0.0) > 300:
+        active_connect4_games.pop(chat_id, None)
+        await query.answer("⏳ Connect 4 game expired due to 5 minutes of inactivity!", show_alert=True)
+        try:
+            await query.edit_message_text(
+                "⏳ <b>CONNECT 4 BATTLE EXPIRED!</b>\n\n<i>Game ended due to 5 minutes of inactivity. Type /join4 to start a new game!</i>",
+                parse_mode='HTML'
+            )
+        except Exception:
+            pass
         return
 
     if user.id != game["current_turn"]:
@@ -5399,9 +5588,20 @@ async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     chat_id = update.message.chat.id
     track_user_data(user)
 
+    now = time.time()
     dropped = active_drops.get(chat_id)
     if not dropped:
         await update.message.reply_text("ℹ️ No active recruit drop in this chat right now!", parse_mode='HTML')
+        return
+
+    # Check 10-minute walk off / expiration
+    summoned_at = dropped.get("summoned_at", 0.0)
+    if summoned_at > 0 and (now - summoned_at > 600):
+        active_drops.pop(chat_id, None)
+        await update.message.reply_text(
+            "⏳ <b>The recruit waited for 10 minutes and walked off!</b> Use <code>/summon</code> to find another recruit.",
+            parse_mode='HTML'
+        )
         return
 
     active_drops.pop(chat_id, None)
@@ -5709,53 +5909,121 @@ async def sendss_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
 
 # ==================== COMMAND HANDLERS ====================
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Displays help menu with all available commands."""
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays an attractive welcome message about Sylvi AI & Cultivation Card Bot."""
     if not update.message:
         return
 
     user = update.message.from_user
-    track_user_data(user)
-    user_id = user.id if user else 0
+    if user:
+        track_user_data(user)
 
-    help_text = (
-        "🤖 <b>Sylvi AI &amp; Cultivation Card Bot - Help Menu</b>\n\n"
-        "🌌 <b>Cultivation Anime Card System:</b>\n"
-        "• <code>/summon</code> - Summon a recruit drop.\n"
-        "• <code>/recruit</code> / <code>/claim</code> / <code>/grab</code> - Bring dropped card into your crew.\n"
-        "• <code>/mycards</code> / <code>/roster</code> - View your owned cards and stay limits.\n"
-        "• <code>/scard &lt;code&gt;</code> / <code>/showcard</code> - View card details (Name, Worth, Tier, Stay Time).\n"
-        "• <code>/discard &lt;code&gt;</code> - Discard a card to receive Spirit Stones (SS) equal to its worth.\n"
-        "• <code>/allcards</code> - View all cards available in the global card pool.\n"
-        "• <code>/daily</code> - Claim daily 500 Spirit Stones (SS) + 1 Bonus Mortal Card.\n"
-        "• <code>/pillshop</code> - View pills shop to extend stay duration.\n"
-        "• <code>/buy &lt;pill&gt; [qty]</code> - Buy pills (e.g. <code>/buy qi 2</code>, <code>/buy eternal</code>).\n"
-        "• <code>/inventory</code> - Check your Spirit Stones balance and pills stock.\n"
-        "• <code>/cultivate &lt;code&gt; &lt;pill&gt;</code> - Feed pills to extend card stay duration.\n"
-        "• <code>/offer &lt;code&gt; &lt;price_ss&gt;</code> - Sell card to another user for Spirit Stones.\n"
-        "• <code>/buyoffer &lt;offer_id&gt;</code> - Buy an offered card.\n"
-        "• <code>/swap &lt;your_code&gt; &lt;their_code&gt;</code> - Swap cards (strictly SAME TIER only!).\n\n"
-        "📌 <b>General Commands:</b>\n"
-        "• <code>/help</code> ya <code>/start</code> - Help menu dekhein.\n"
-        "• <code>/statsgc</code> - Group chat stats &amp; memory info dekhein.\n"
-        "• <code>/4words</code> - 4-letter word guessing game (30 tries + hints).\n"
-        "• <code>/join4 &lt;bet_ss&gt;</code> - Connect 4 game (PvP vs user by replying, or vs Bot without reply).\n\n"
-        "🔥 <b>AI Assistant Features:</b>\n"
-        "• <b>AI Name:</b> Bot ka naam <b>Sylvi</b> hai! Reply karke, <code>@username</code> mention karke, ya <b>Sylvi</b> bolkar baat karein.\n"
+    uname = escape_html(user.first_name) if user else "Cultivator"
+    web_app_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-xcem.onrender.com"
+    chat_type = update.message.chat.type
+
+    if chat_type in ['group', 'supergroup']:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🌟 Open Cultivation Mini App", url="https://t-xcem.onrender.com")],
+            [InlineKeyboardButton("📜 View Commands (/help)", callback_data="help_show_user")]
+        ])
+    else:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🌟 Open Cultivation Mini App", web_app=WebAppInfo(url=f"{web_app_url}?user_id={user.id if user else 5193216992}"))],
+            [InlineKeyboardButton("📜 View Commands (/help)", callback_data="help_show_user"), InlineKeyboardButton("👥 Official Group", url=GROUP_LINK)]
+        ])
+
+    welcome_text = (
+        f"⛩️ <b>WELCOME TO CULTIVATION CULT &amp; SYLVI AI</b> ⛩️\n\n"
+        f"Greetings, <b>{uname}</b>! 🧘‍♂️\n\n"
+        f"Step into the ultimate Anime Cultivation realm where you can collect rare anime heroes, cultivate immortal bodies, play spiritual games, and trade Spirit Stones!\n\n"
+        f"✨ <b>CORE BOT FEATURES:</b>\n"
+        f"• 🎴 <b>Anime Recruit Drops:</b> Summon &amp; claim legendary anime cards in group chats!\n"
+        f"• 💊 <b>Cultivation &amp; Immortality:</b> Feed pills to extend stay duration or achieve Eternal Life ♾️!\n"
+        f"• 💎 <b>Spirit Stones Economy:</b> Earn via <code>/daily</code>, <code>/mine</code>, and Connect 4 (<code>/join4</code>)!\n"
+        f"• 🛍️ <b>Market &amp; Transfers:</b> Sell cards on <code>/offer</code>, swap cards via <code>/swap</code>, and send SS using <code>/sendss</code>!\n"
+        f"• 📱 <b>Interactive Telegram Mini App:</b> Check dashboard, shop, and cards at <code>https://t-xcem.onrender.com</code>!\n\n"
+        f"💡 <i>Type <code>/help</code> for all user commands!</i>"
     )
 
-    if is_owner(user_id):
-        help_text += (
-            "\n👑 <b>Owner Special Commands:</b>\n"
-            "• <code>/addcard &lt;tier&gt; &lt;name&gt;</code> - Add new character card to pool (with photo).\n"
-            "• <code>/addapi &lt;key&gt;</code> - Dynamic Nayi Groq API key add karein.\n"
-            "• <code>/listapi</code> - Sabhi active Groq API keys ka status dekhein.\n"
-            "• <code>/allusers</code> - Total collected users database stats dekhein.\n"
-            "• <code>/mongoexport</code> - Mongo DB backup JSON export karein.\n"
-            "• <code>/mongoimport</code> - Local JSON data Mongo DB mein sync karein.\n"
-        )
+    await update.message.reply_text(welcome_text, reply_markup=keyboard, parse_mode='HTML')
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays help menu with all available user commands."""
+    if not update.message:
+        return
+
+    user = update.message.from_user
+    if user:
+        track_user_data(user)
+
+    help_text = (
+        "🤖 <b>SYLVI AI &amp; CULTIVATION CARD BOT - USER COMMANDS</b>\n\n"
+        "🌌 <b>Cultivation Anime Card System:</b>\n"
+        "• <code>/summon</code> - Summon a recruit drop in group chat (10-min active drop limit).\n"
+        "• <code>/recruit</code> / <code>/claim</code> / <code>/grab</code> - Recruit dropped card into your crew.\n"
+        "• <code>/mycards</code> / <code>/roster</code> - View your crew cards, stay limits, &amp; favorite card photo.\n"
+        "• <code>/favcard &lt;code_or_name&gt;</code> - Set favorite card to display in <code>/mycards</code> &amp; Mini App.\n"
+        "• <code>/scard &lt;code&gt;</code> / <code>/showcard</code> - View detailed stats of a card (Tier, Worth, Stay Time).\n"
+        "• <code>/discard &lt;code&gt;</code> - Discard a card to earn Spirit Stones (SS).\n"
+        "• <code>/search &lt;name&gt;</code> - Search any card in global pool &amp; view owners.\n"
+        "• <code>/allcards</code> - View all character cards available in the global pool.\n"
+        "• <code>/daily</code> - Claim daily 500 Spirit Stones (SS) + 1 Bonus Mortal Card.\n"
+        "• <code>/pillshop</code> - Open cultivation pills shop.\n"
+        "• <code>/buy &lt;pill&gt; [qty]</code> - Buy pills to extend card stay time.\n"
+        "• <code>/inventory</code> - Check your Spirit Stones balance &amp; pills stock.\n"
+        "• <code>/cultivate &lt;code&gt; &lt;pill&gt;</code> - Feed pills to cards for stay extension or immortality.\n"
+        "• <code>/sendss &lt;amount&gt;</code> - Transfer Spirit Stones by replying to a user's message (5k SS daily cap).\n"
+        "• <code>/offer &lt;code&gt; &lt;price_ss&gt;</code> - List a card for sale on market.\n"
+        "• <code>/buyoffer &lt;offer_id&gt;</code> - Buy an offered card.\n"
+        "• <code>/swap &lt;your_code&gt; &lt;their_code&gt;</code> - Swap same-tier cards with another user.\n"
+        "• <code>/myprofile</code> / <code>/profile</code> - View collection progress % and tier stats.\n"
+        "• <code>/leaderboard</code> / <code>/lb</code> - View top Spirit Stones players leaderboard.\n"
+        "• <code>/web</code> - Open Cultivation Telegram Mini App.\n\n"
+        "🎮 <b>Games &amp; General Commands:</b>\n"
+        "• <code>/mine &lt;bet&gt; &lt;mines&gt;</code> - Spiritual Mines betting game (Min 50 SS, 5-min timeout).\n"
+        "• <code>/join4 [bet]</code> - Connect 4 battle vs Bot (+100 SS win, 2k daily cap) or PvP against user.\n"
+        "• <code>/4words</code> - 4-letter word guessing game.\n"
+        "• <code>/status</code> - View bot system health &amp; game statistics.\n"
+        "• <code>/help</code> - Show this user commands menu.\n"
+        "• <code>/start</code> - Welcome message &amp; quick guide."
+    )
 
     await update.message.reply_text(help_text, parse_mode='HTML')
+
+async def ohelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays owner commands menu (Owner only)."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    track_user_data(user)
+
+    if not is_owner(user.id):
+        await update.message.reply_text("🚫 Only the bot owner can use <code>/ohelp</code>!", parse_mode='HTML')
+        return
+
+    ohelp_text = (
+        "👑 <b>SYLVI BOT - OWNER COMMANDS &amp; MANAGEMENT MANUAL</b>\n\n"
+        "⚙️ <b>Global Card &amp; Rarity Management:</b>\n"
+        "• <code>/rarity</code> - Open Global Card Edit Wizard:\n"
+        "   - Change card image globally across all users.\n"
+        "   - Change character name globally across all users.\n"
+        "   - Adjust tier spawn rates &amp; rarity percentages (Primordial, Celestial, etc.).\n"
+        "• <code>/addcard &lt;tier&gt; &lt;name&gt;</code> - Wizard to add a new card to global pool (with photo).\n"
+        "• <code>/removecard &lt;pool_id_or_name&gt;</code> - Delete a card permanently from global base pool.\n\n"
+        "📊 <b>System &amp; Logging Commands:</b>\n"
+        "• <code>/logsgc</code> - Set current group chat (or target chat ID) for real-time activity logs.\n"
+        "• <code>/statsgc</code> - View group message activity stats and memory info.\n"
+        "• <code>/allusers</code> - View summary of all tracked users in database.\n\n"
+        "🔑 <b>API &amp; Database Backup Management:</b>\n"
+        "• <code>/addapi &lt;groq_api_key&gt;</code> - Dynamically add a new Groq AI API key.\n"
+        "• <code>/listapi</code> - View status and request counts of all loaded Groq API keys.\n"
+        "• <code>/mongoexport</code> - Export MongoDB database backup JSON files.\n"
+        "• <code>/mongoimport</code> - Import MongoDB database backup JSON files."
+    )
+
+    await update.message.reply_text(ohelp_text, parse_mode='HTML')
 
 async def addapi_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Owner command to add a new Groq API key dynamically."""
@@ -6199,6 +6467,20 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     else:
         bet = 0
 
+    now = time.time()
+    existing_c4 = active_connect4_games.get(chat_id)
+    if existing_c4 and existing_c4.get("status") == "active":
+        c4_start = existing_c4.get("start_time", 0.0)
+        if now - c4_start < 300:  # 5 minutes
+            await update.message.reply_text(
+                "⏳ <b>Connect 4 Game Already Active!</b>\n"
+                "A game is already in progress in this chat. Finish it or wait for the 5-minute inactivity timeout.",
+                parse_mode='HTML'
+            )
+            return
+        else:
+            active_connect4_games.pop(chat_id, None)
+
     game_state = {
         "chat_id": chat_id,
         "player1_id": user.id,
@@ -6208,7 +6490,8 @@ async def join4_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "bet": bet,
         "board": [["⚪️" for _ in range(7)] for _ in range(6)],
         "current_turn": user.id,
-        "status": "active"
+        "status": "active",
+        "start_time": now
     }
     active_connect4_games[chat_id] = game_state
 
@@ -6225,9 +6508,23 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
     chat_id = query.message.chat.id
     data = query.data or ""
 
+    now = time.time()
     game = active_connect4_games.get(chat_id)
     if not game or game["status"] != "active":
         await query.answer("⚠️ No active Connect 4 game in this chat! Start one with /join4.", show_alert=True)
+        return
+
+    # Check 5-minute expiration
+    if now - game.get("start_time", 0.0) > 300:
+        active_connect4_games.pop(chat_id, None)
+        await query.answer("⏳ Connect 4 game expired due to 5 minutes of inactivity!", show_alert=True)
+        try:
+            await query.edit_message_text(
+                "⏳ <b>CONNECT 4 BATTLE EXPIRED!</b>\n\n<i>Game ended due to 5 minutes of inactivity. Type /join4 to start a new game!</i>",
+                parse_mode='HTML'
+            )
+        except Exception:
+            pass
         return
 
     if user.id != game["current_turn"]:
@@ -6771,7 +7068,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     "name": c_name,
                     "tier": dropped_tier,
                     "photo": c_photo,
-                    "worth": TIER_WORTH.get(dropped_tier, 200)
+                    "worth": TIER_WORTH.get(dropped_tier, 200),
+                    "code": base_card.get("code"),
+                    "summoned_at": time.time()
                 }
 
                 symbol = TIER_SYMBOLS.get(dropped_tier, "⚪️")
@@ -7205,8 +7504,9 @@ def main():
     app.add_error_handler(error_handler)
 
     # Public & Owner Command Handlers
-    app.add_handler(CommandHandler("start", help_command))
+    app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("ohelp", ohelp_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("web", web_command))
     app.add_handler(CommandHandler("leaderboard", leaderboard_command))
