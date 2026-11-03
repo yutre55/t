@@ -1464,10 +1464,21 @@ async def connect4_callback_handler(update: Update, context: ContextTypes.DEFAUL
     # Check 5-minute expiration
     if now - game.get("start_time", 0.0) > 300:
         active_connect4_games.pop(chat_id, None)
-        await query.answer("⏳ Connect 4 game expired due to 5 minutes of inactivity!", show_alert=True)
+
+        refund_msg = ""
+        if game.get("player2_id", 0) != 0 and game.get("bet", 0) > 0:
+            eco1 = get_user_economy(game["player1_id"])
+            eco1["spirit_stones"] += game["bet"]
+            eco2 = get_user_economy(game["player2_id"])
+            eco2["spirit_stones"] += game["bet"]
+            save_user_economy(user_economy_db)
+            refund_msg = f"\n\n💰 Both players' bets (<code>{game['bet']} SS</code> each) have been refunded!"
+            send_telegram_log(f"🤝 <b>Connect 4 Expired & Refunded:</b> Refunded {game['bet']} SS each to User {game['player1_id']} & User {game['player2_id']}")
+
+        await query.answer("⏳ Connect 4 battle expired due to 5 minutes of inactivity! Bets refunded.", show_alert=True)
         try:
             await query.edit_message_text(
-                "⏳ <b>CONNECT 4 BATTLE EXPIRED!</b>\n\n<i>Game ended due to 5 minutes of inactivity. Type /join4 to start a new game!</i>",
+                f"⏳ <b>CONNECT 4 BATTLE EXPIRED!</b>\n\n<i>Game ended due to 5 minutes of inactivity.{refund_msg}\nType /join4 to start a new game!</i>",
                 parse_mode='HTML'
             )
         except Exception:
