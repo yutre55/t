@@ -6265,6 +6265,89 @@ async def mongoimport_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         await update.message.reply_text(f"❌ Failed to import JSON data to MongoDB: {e}")
 
+async def minfo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Owner command to display detailed MongoDB Atlas storage, RAM cache, latency, and collection stats."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user_id = update.message.from_user.id
+    if not is_owner(user_id):
+        await update.message.reply_text("🚫 Only the bot owner can use this command!")
+        return
+
+    db = get_mongo_db()
+    if db is None:
+        await update.message.reply_text("🟡 <b>MongoDB is NOT connected!</b> Bot is currently using local JSON storage fallback.", parse_mode='HTML')
+        return
+
+    try:
+        start_ping = time.time()
+        db.command('ping')
+        ping_ms = round((time.time() - start_ping) * 1000, 1)
+
+        db_stats = db.command("dbStats")
+
+        db_name = db_stats.get("db", "sylvi_bot_db")
+        collections_cnt = db_stats.get("collections", 0)
+        total_objects = db_stats.get("objects", 0)
+
+        data_bytes = db_stats.get("dataSize", 0)
+        storage_bytes = db_stats.get("storageSize", 0)
+        index_bytes = db_stats.get("indexSize", 0)
+
+        data_mb = data_bytes / (1024 * 1024)
+        storage_mb = storage_bytes / (1024 * 1024)
+        index_mb = index_bytes / (1024 * 1024)
+        total_used_mb = storage_mb + index_mb
+
+        # MongoDB Atlas Free Tier Quota (M0 Cluster = 512 MB)
+        ATLAS_QUOTA_MB = 512.0
+        used_pct = round((total_used_mb / ATLAS_QUOTA_MB) * 100.0, 2)
+        remaining_mb = round(max(0.0, ATLAS_QUOTA_MB - total_used_mb), 2)
+
+        # Progress bar
+        bar_len = 10
+        filled = int((used_pct / 100.0) * bar_len)
+        progress_bar = "🟩" * filled + "⬜" * (bar_len - filled)
+
+        # Individual Collection Document Counts
+        c_users = db["users"].count_documents({})
+        c_cards_pool = db["cards_pool"].count_documents({})
+        c_user_cards = db["user_cards"].count_documents({})
+        c_user_economy = db["user_economy"].count_documents({})
+        c_reminders = db["reminders"].count_documents({})
+        c_logs = db["logs_config"].count_documents({})
+
+        text = (
+            f"📊 <b>MONGODB ATLAS DATABASE DIAGNOSTICS (/minfo)</b> 🟢\n\n"
+            f"⚡ <b>Atlas Latency / Ping:</b> <code>{ping_ms} ms</code>\n"
+            f"💾 <b>Database Name:</b> <code>{db_name}</code>\n"
+            f"📡 <b>Connection Status:</b> 🟢 Connected\n\n"
+            f"📈 <b>STORAGE & QUOTA (Atlas M0 512 MB):</b>\n"
+            f"• <b>Storage Used:</b> <code>{total_used_mb:.2f} MB</code> / <code>512 MB</code> (<code>{used_pct}%</code>)\n"
+            f"• <b>Free Space Left:</b> <code>{remaining_mb:.2f} MB</code>\n"
+            f"• <b>Quota Usage Bar:</b> [{progress_bar}]\n"
+            f"• <b>Raw Data Size:</b> <code>{data_mb:.2f} MB</code>\n"
+            f"• <b>Allocated Storage:</b> <code>{storage_mb:.2f} MB</code>\n"
+            f"• <b>Index Size:</b> <code>{index_mb:.2f} MB</code>\n\n"
+            f"📂 <b>COLLECTIONS & DOCUMENTS BREAKDOWN:</b>\n"
+            f"• Total Collections: <code>{collections_cnt}</code>\n"
+            f"• Total Saved Documents: <code>{total_objects}</code>\n"
+            f"  └ 👥 <code>users</code>: <code>{c_users} docs</code>\n"
+            f"  └ 🎴 <code>cards_pool</code>: <code>{c_cards_pool} base cards</code>\n"
+            f"  └ 📜 <code>user_cards</code>: <code>{c_user_cards} roster cards</code>\n"
+            f"  └ 💎 <code>user_economy</code>: <code>{c_user_economy} accounts</code>\n"
+            f"  └ 📌 <code>reminders</code>: <code>{c_reminders} notes</code>\n"
+            f"  └ ⚙️ <code>logs_config</code>: <code>{c_logs} configs</code>\n\n"
+            f"✨ <i>All database systems operating at peak performance!</i>"
+        )
+
+        await update.message.reply_text(text, parse_mode='HTML')
+
+    except Exception as e:
+        logger.error(f"Error fetching minfo dbStats: {e}")
+        await update.message.reply_text(f"❌ Failed to fetch MongoDB stats: {escape_html(str(e))}", parse_mode='HTML')
+
 async def fourwords_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles /4words command to start, check, or stop a 4-letter word guessing game."""
     if not update.message:
@@ -7529,6 +7612,7 @@ def main():
     app.add_handler(CommandHandler("allusers", allusers_command))
     app.add_handler(CommandHandler("mongoexport", mongoexport_command))
     app.add_handler(CommandHandler("mongoimport", mongoimport_command))
+    app.add_handler(CommandHandler(["minfo", "mongoinfo"], minfo_command))
     app.add_handler(CommandHandler("4words", fourwords_command))
     app.add_handler(CommandHandler("join4", join4_command))
     app.add_handler(CommandHandler("sendss", sendss_command))
