@@ -110,6 +110,85 @@ def save_logs_gc_id(chat_id: int):
 
 LOGS_GC_ID = load_logs_gc_id()
 
+def load_cards_channel_id() -> int:
+    db = get_mongo_db()
+    if db is not None:
+        try:
+            doc = db["logs_config"].find_one({"_id": "cards_channel"})
+            if doc and "channel_id" in doc:
+                return int(doc["channel_id"])
+        except Exception as e:
+            logger.error(f"Error loading cards_channel_id from MongoDB: {e}")
+
+    if os.path.exists(LOGS_CONFIG_FILE):
+        try:
+            with open(LOGS_CONFIG_FILE, "r", encoding="utf-8") as f:
+                return int(json.load(f).get("cards_channel_id", 0))
+        except Exception:
+            pass
+
+    return int(os.getenv("CARDS_CHANNEL_ID", "0"))
+
+def save_cards_channel_id(channel_id: int):
+    try:
+        existing = {}
+        if os.path.exists(LOGS_CONFIG_FILE):
+            try:
+                with open(LOGS_CONFIG_FILE, "r", encoding="utf-8") as rf:
+                    existing = json.load(rf)
+            except Exception:
+                pass
+        existing["cards_channel_id"] = channel_id
+        with open(LOGS_CONFIG_FILE, "w", encoding="utf-8") as wf:
+            json.dump(existing, wf, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving cards_channel_id in logs_config.json: {e}")
+
+    db = get_mongo_db()
+    if db is not None:
+        try:
+            db["logs_config"].replace_one(
+                {"_id": "cards_channel"},
+                {"_id": "cards_channel", "channel_id": channel_id, "updated_at": time.time()},
+                upsert=True
+            )
+            logger.info(f"✅ Saved CARDS_CHANNEL_ID ({channel_id}) to MongoDB logs_config collection.")
+        except Exception as e:
+            logger.error(f"Error saving cards_channel_id to MongoDB: {e}")
+
+CARDS_CHANNEL_ID = load_cards_channel_id()
+
+def send_cards_channel_log(photo: str, caption: str):
+    global CARDS_CHANNEL_ID
+    if CARDS_CHANNEL_ID == 0:
+        return
+    try:
+        if photo:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+            payload = {
+                "chat_id": CARDS_CHANNEL_ID,
+                "photo": photo,
+                "caption": caption,
+                "parse_mode": "HTML"
+            }
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                pass
+        else:
+            url_msg = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+            payload_msg = {
+                "chat_id": CARDS_CHANNEL_ID,
+                "text": caption,
+                "parse_mode": "HTML"
+            }
+            data = json.dumps(payload_msg).encode("utf-8")
+            req = urllib.request.Request(url_msg, data=data, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                pass
+    except Exception as e:
+        logger.warning(f"Could not send cards channel announcement: {e}")
+
 def send_telegram_log(text: str):
     global LOGS_GC_ID
     if LOGS_GC_ID == 0:
@@ -4015,12 +4094,23 @@ async def finalize_rarity_image_update(update: Update, user_id: int, base_card: 
 
     c_name = escape_html(base_card.get("name"))
     t_emoji = TIER_EMOJIS.get(base_card.get("tier"), base_card.get("tier"))
+    c_worth = get_card_worth(base_card)
 
     send_telegram_log(
         f"🖼️ <b>GLOBAL CARD IMAGE UPDATED</b>\n"
         f"🎴 <b>Card:</b> {t_emoji} - <b>{c_name}</b> (Code: <code>{target_code}</code>)\n"
         f"👥 <b>Updated in Rosters:</b> <code>{updated_count} user card instances</code>"
     )
+
+    channel_caption = (
+        f"🖼️ <b>CARD IMAGE REPLACED GLOBALLY!</b> 🎨\n\n"
+        f"⚔️ <b>Character:</b> <b>{c_name}</b>\n"
+        f"✨ <b>Tier:</b> {t_emoji}\n"
+        f"🔑 <b>Code:</b> <code>{target_code}</code>\n"
+        f"💎 <b>Worth:</b> <code>{c_worth} SS</code>\n\n"
+        f"🔄 <i>This card's artwork has been updated across all user rosters & global pool!</i>"
+    )
+    send_cards_channel_log(new_photo, channel_caption)
 
     msg = (
         f"✅ <b>CARD IMAGE UPDATED GLOBALLY!</b> 🎉\n\n"
@@ -4038,7 +4128,8 @@ async def finalize_rarity_name_update(update: Update, user_id: int, base_card: D
     if not base_card:
         return
     target_code = base_card.get("code")
-    old_name_lower = base_card.get("name", "").strip().lower()
+    old_name = base_card.get("name", "Card")
+    old_name_lower = old_name.strip().lower()
 
     # 1. Update in cards_pool_db
     base_card["name"] = new_name
@@ -4055,13 +4146,26 @@ async def finalize_rarity_name_update(update: Update, user_id: int, base_card: D
     owner_rarity_sessions.pop(user_id, None)
 
     c_name_esc = escape_html(new_name)
+    old_name_esc = escape_html(old_name)
     t_emoji = TIER_EMOJIS.get(base_card.get("tier"), base_card.get("tier"))
+    c_worth = get_card_worth(base_card)
+    photo = base_card.get("photo", "")
 
     send_telegram_log(
         f"✏️ <b>GLOBAL CARD NAME UPDATED</b>\n"
-        f"🎴 <b>New Name:</b> {t_emoji} - <b>{c_name_esc}</b> (Code: <code>{target_code}</code>)\n"
+        f"🎴 <b>Name Changed:</b> <b>{old_name_esc}</b> ➔ <b>{c_name_esc}</b> (Code: <code>{target_code}</code>)\n"
         f"👥 <b>Updated in Rosters:</b> <code>{updated_count} user card instances</code>"
     )
+
+    channel_caption = (
+        f"✏️ <b>CARD NAME UPDATED GLOBALLY!</b> 📝\n\n"
+        f"⚔️ <b>Name Changed:</b> <b>{old_name_esc}</b> ➔ <b>{c_name_esc}</b>\n"
+        f"✨ <b>Tier:</b> {t_emoji}\n"
+        f"🔑 <b>Code:</b> <code>{target_code}</code>\n"
+        f"💎 <b>Worth:</b> <code>{c_worth} SS</code>\n\n"
+        f"🔄 <i>This card name has been updated across all user rosters & global pool!</i>"
+    )
+    send_cards_channel_log(photo, channel_caption)
 
     msg = (
         f"✅ <b>CARD NAME UPDATED GLOBALLY!</b> 🎉\n\n"
@@ -4093,10 +4197,23 @@ async def finalize_add_card(update: Update, user_id: int, tier: str, char_name: 
     send_telegram_log(f"➕ New Card Added to Pool by owner: <b>{char_name}</b> [{tier}] (ID: <code>{card_id}</code>, Code: <code>{card_code}</code>)")
 
     tier_emoji = TIER_EMOJIS.get(tier, tier)
+    c_worth = TIER_WORTH.get(tier, 200)
+    c_name_esc = escape_html(char_name)
+
+    channel_caption = (
+        f"✨ <b>NEW ANIME CARD ADDED TO POOL!</b> 🎉\n\n"
+        f"⚔️ <b>Character:</b> <b>{c_name_esc}</b>\n"
+        f"✨ <b>Tier:</b> {tier_emoji}\n"
+        f"🔑 <b>Code:</b> <code>{card_code}</code>\n"
+        f"💎 <b>Worth:</b> <code>{c_worth} SS</code>\n"
+        f"🆔 <b>Pool ID:</b> <code>{card_id}</code>\n\n"
+        f"💡 <i>This card is now live in global pool and can be summoned in group chats!</i>"
+    )
+    send_cards_channel_log(photo, channel_caption)
 
     text = (
         f"✅ <b>NEW CARD ADDED TO GLOBAL POOL!</b> 🎉\n\n"
-        f"⚔️ <b>Character Name:</b> <b>{escape_html(char_name)}</b>\n"
+        f"⚔️ <b>Character Name:</b> <b>{c_name_esc}</b>\n"
         f"✨ <b>Tier:</b> {tier_emoji}\n"
         f"🆔 <b>Card Pool ID:</b> <code>{card_id}</code>\n"
         f"🔑 <b>Assigned Code:</b> <code>{card_code}</code>\n\n"
@@ -5544,6 +5661,58 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except ValueError:
         await message.reply_text("⚠️ Invalid Chat ID! Must be a valid integer.", parse_mode='HTML')
 
+async def cardschannel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Owner command to set target Channel ID/Username for official Card Drops & Updates announcements."""
+    global CARDS_CHANNEL_ID
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    if not is_owner(user.id):
+        await message.reply_text("🚫 Only the bot owner can use this command!")
+        return
+
+    args = context.args or []
+    if not args:
+        chat_id = message.chat.id
+        CARDS_CHANNEL_ID = chat_id
+        save_cards_channel_id(chat_id)
+        await message.reply_text(
+            f"✅ <b>Cards Announcement Channel Set Successfully!</b>\n"
+            f"This chat (ID: <code>{chat_id}</code>) will now receive all new card additions & image/name replacement announcements.\n\n"
+            f"<i>Note: Make sure the bot is added as an Admin in the channel with Post Messages permission!</i>",
+            parse_mode='HTML'
+        )
+        return
+
+    target = args[0].strip()
+    try:
+        target_id = int(target)
+        CARDS_CHANNEL_ID = target_id
+        save_cards_channel_id(target_id)
+        await message.reply_text(
+            f"✅ <b>Cards Announcement Channel Set Successfully!</b>\n"
+            f"Target Channel ID: <code>{target_id}</code> will now receive all card announcements.\n\n"
+            f"<i>Note: Make sure the bot is added as an Admin in the channel!</i>",
+            parse_mode='HTML'
+        )
+    except ValueError:
+        if target.startswith("@"):
+            try:
+                chat = await context.bot.get_chat(target)
+                CARDS_CHANNEL_ID = chat.id
+                save_cards_channel_id(chat.id)
+                await message.reply_text(
+                    f"✅ <b>Cards Announcement Channel Set Successfully!</b>\n"
+                    f"Channel: {target} (ID: <code>{chat.id}</code>) will now receive all card announcements.\n\n"
+                    f"<i>Note: Make sure the bot is added as an Admin in the channel!</i>",
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                await message.reply_text(f"❌ Failed to fetch channel details for <code>{target}</code>: {escape_html(str(e))}\nMake sure bot is added as Admin in the channel first!", parse_mode='HTML')
+        else:
+            await message.reply_text("⚠️ Invalid Channel ID/Username! Pass integer chat ID (e.g. <code>-100123456789</code>) or <code>@ChannelUsername</code>.", parse_mode='HTML')
+
 async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Displays the Spirit Stones economy leaderboard (top players)."""
     message = update.effective_message
@@ -6795,6 +6964,58 @@ async def logsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except ValueError:
         await message.reply_text("⚠️ Invalid Chat ID! Must be a valid integer.", parse_mode='HTML')
 
+async def cardschannel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Owner command to set target Channel ID/Username for official Card Drops & Updates announcements."""
+    global CARDS_CHANNEL_ID
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    if not is_owner(user.id):
+        await message.reply_text("🚫 Only the bot owner can use this command!")
+        return
+
+    args = context.args or []
+    if not args:
+        chat_id = message.chat.id
+        CARDS_CHANNEL_ID = chat_id
+        save_cards_channel_id(chat_id)
+        await message.reply_text(
+            f"✅ <b>Cards Announcement Channel Set Successfully!</b>\n"
+            f"This chat (ID: <code>{chat_id}</code>) will now receive all new card additions & image/name replacement announcements.\n\n"
+            f"<i>Note: Make sure the bot is added as an Admin in the channel with Post Messages permission!</i>",
+            parse_mode='HTML'
+        )
+        return
+
+    target = args[0].strip()
+    try:
+        target_id = int(target)
+        CARDS_CHANNEL_ID = target_id
+        save_cards_channel_id(target_id)
+        await message.reply_text(
+            f"✅ <b>Cards Announcement Channel Set Successfully!</b>\n"
+            f"Target Channel ID: <code>{target_id}</code> will now receive all card announcements.\n\n"
+            f"<i>Note: Make sure the bot is added as an Admin in the channel!</i>",
+            parse_mode='HTML'
+        )
+    except ValueError:
+        if target.startswith("@"):
+            try:
+                chat = await context.bot.get_chat(target)
+                CARDS_CHANNEL_ID = chat.id
+                save_cards_channel_id(chat.id)
+                await message.reply_text(
+                    f"✅ <b>Cards Announcement Channel Set Successfully!</b>\n"
+                    f"Channel: {target} (ID: <code>{chat.id}</code>) will now receive all card announcements.\n\n"
+                    f"<i>Note: Make sure the bot is added as an Admin in the channel!</i>",
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                await message.reply_text(f"❌ Failed to fetch channel details for <code>{target}</code>: {escape_html(str(e))}\nMake sure bot is added as Admin in the channel first!", parse_mode='HTML')
+        else:
+            await message.reply_text("⚠️ Invalid Channel ID/Username! Pass integer chat ID (e.g. <code>-100123456789</code>) or <code>@ChannelUsername</code>.", parse_mode='HTML')
+
 async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Displays the Spirit Stones economy leaderboard (top players)."""
     message = update.effective_message
@@ -7606,6 +7827,7 @@ def main():
     app.add_handler(CommandHandler("leaderboard", leaderboard_command))
     app.add_handler(CommandHandler("lb", leaderboard_command))
     app.add_handler(CommandHandler("logsgc", logsgc_command))
+    app.add_handler(CommandHandler(["cardschannel", "setchannel"], cardschannel_command))
     app.add_handler(CommandHandler("addapi", addapi_command))
     app.add_handler(CommandHandler("listapi", listapi_command))
     app.add_handler(CommandHandler("statsgc", statsgc_command))
