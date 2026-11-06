@@ -834,10 +834,33 @@ def get_user_tag(user) -> str:
         return f"@{user.username}"
     return user.first_name or "Bhai"
 
-def is_owner(user_id: int) -> bool:
-    if OWNER_ID == 0:
-        return False
-    return user_id == OWNER_ID
+def is_user_banned(user_id: int) -> Tuple[bool, str]:
+    if is_owner(user_id):
+        return False, ""  # Owner cannot be banned
+
+    u = users_db.get(str(user_id), {})
+    if not u.get("is_banned", False):
+        return False, ""
+
+    banned_until = u.get("banned_until", 0.0)
+    now = time.time()
+
+    if banned_until > 0.0 and now > banned_until:
+        # Temporary ban expired! Auto unban
+        u["is_banned"] = False
+        u["banned_until"] = 0.0
+        save_users_data(users_db)
+        return False, ""
+
+    if banned_until > 0.0:
+        rem_sec = int(banned_until - now)
+        days = rem_sec // 86400
+        hours = (rem_sec % 86400) // 3600
+        mins = (rem_sec % 3600) // 60
+        time_str = f"{days}d {hours}h {mins}m" if days > 0 else f"{hours}h {mins}m"
+        return True, f"You are temporarily banned from using this bot for {time_str}!"
+
+    return True, "You are permanently banned from using this bot!"
 
 def find_user_in_db(identifier: str) -> Optional[Dict]:
     """
@@ -1784,6 +1807,52 @@ async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await message.reply_text(text, parse_mode='HTML')
 
+async def check_user_start_and_channel(update: Update, context: ContextTypes.DEFAULT_TYPE, user) -> bool:
+    user_id = user.id
+    u_info = users_db.get(str(user_id), {})
+    has_started = u_info.get("has_started_dm", False)
+
+    bot_username = context.bot.username if context.bot else ""
+    channel_username = "@Murim_recruit"
+    channel_url = "https://t.me/Murim_recruit"
+    start_bot_url = f"https://t.me/{bot_username}?start=1" if bot_username else channel_url
+
+    is_channel_joined = True
+    try:
+        member = await context.bot.get_chat_member(chat_id=channel_username, user_id=user_id)
+        if not member or member.status not in ['creator', 'administrator', 'member', 'restricted']:
+            is_channel_joined = False
+    except Exception:
+        is_channel_joined = False
+
+    if not has_started or not is_channel_joined:
+        keyboard_buttons = [
+            [InlineKeyboardButton("📢 Join Official Channel", url=channel_url)],
+            [InlineKeyboardButton("🤖 Start Bot First", url=start_bot_url)]
+        ]
+        keyboard = InlineKeyboardMarkup(keyboard_buttons)
+
+        uname = escape_html(user.first_name)
+        reasons = []
+        if not has_started:
+            reasons.append("• <b>Start the bot in Private Chat first</b>")
+        if not is_channel_joined:
+            reasons.append("• <b>Join our official channel @Murim_recruit</b>")
+
+        reasons_str = "\n".join(reasons)
+
+        await update.message.reply_text(
+            f"⚠️ <b>ACCESS DENIED FOR {uname.upper()}!</b>\n\n"
+            f"To summon cards and use commands, you must complete these steps:\n"
+            f"{reasons_str}\n\n"
+            f"👇 <i>Tap the buttons below to complete them and try again!</i>",
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+        return False
+
+    return True
+
 async def summon_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Summons a random card drop in group chat with tier probabilities."""
     if not update.message or not update.message.from_user:
@@ -1796,6 +1865,11 @@ async def summon_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # RESTRICTION: Group chat only
     if update.message.chat.type not in ['group', 'supergroup']:
         await update.message.reply_text("⚠️ <code>/summon</code> command only works in group chats!", parse_mode='HTML')
+        return
+
+    # Check if user started bot in DM and joined channel @Murim_recruit
+    passed = await check_user_start_and_channel(update, context, user)
+    if not passed:
         return
 
     now = time.time()
@@ -6097,6 +6171,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user = update.message.from_user
     if user:
         track_user_data(user)
+        u_info = users_db.get(str(user.id), {})
+        u_info["has_started_dm"] = True
+        save_users_data(users_db)
 
     uname = escape_html(user.first_name) if user else "Cultivator"
     web_app_url = os.getenv("RENDER_EXTERNAL_URL") or "https://t-xcem.onrender.com"
@@ -6285,7 +6362,7 @@ async def statsgc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
 
 async def allusers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Owner command to view collected users data statistics."""
+    """Owner command to generate and send a downloadable .txt file of all tracked users."""
     if not update.message or not update.message.from_user:
         return
 
@@ -6299,35 +6376,157 @@ async def allusers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text("📁 <b>No user data collected yet.</b>", parse_mode='HTML')
         return
 
-    # Sort top active users
+    lines = [
+        "=================================================================",
+        "           SYLVI BOT - COMPLETE TRACKED USERS DATABASE           ",
+        f"           Generated At: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}",
+        f"           Total Users Tracked: {total_users}",
+        "=================================================================\n"
+    ]
+
     sorted_users = sorted(
         users_db.values(),
         key=lambda x: x.get("message_count", 0) if isinstance(x, dict) else 0,
         reverse=True
     )
-    top_list = []
-    for u in sorted_users[:10]:
+
+    for idx, u in enumerate(sorted_users, 1):
         if not isinstance(u, dict):
             continue
         uid = u.get("id", "N/A")
-        username = u.get("username", "")
+        uname = u.get("username", "None")
         fname = u.get("first_name", "")
-
-        if username:
-            uname = f"@{escape_html(str(username))}"
-        elif fname:
-            uname = escape_html(str(fname))
-        else:
-            uname = "User"
-
+        lname = u.get("last_name", "")
+        full_name = f"{fname} {lname}".strip() or "User"
         msg_cnt = u.get("message_count", 0)
-        top_list.append(f"• <code>{uid}</code> | {uname} | Messages: <code>{msg_cnt}</code>")
+        is_banned = "BANNED" if u.get("is_banned", False) else "ACTIVE"
 
-    top_str = "\n".join(top_list)
+        first_seen_str = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(u.get("first_seen", time.time())))
+        last_seen_str = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(u.get("last_seen", time.time())))
+
+        lines.append(
+            f"#{idx} | ID: {uid} | @{uname} | Name: {full_name}\n"
+            f"   Status: {is_banned} | Messages: {msg_cnt} | First Seen: {first_seen_str} | Last Seen: {last_seen_str}\n"
+            f"-----------------------------------------------------------------"
+        )
+
+    file_content = "\n".join(lines)
+    bytes_io = io.BytesIO(file_content.encode("utf-8"))
+    filename = f"sylvi_all_users_{int(time.time())}.txt"
+
+    await update.message.reply_document(
+        document=bytes_io,
+        filename=filename,
+        caption=(
+            f"👥 <b>ALL TRACKED USERS DATABASE EXPORT</b>\n\n"
+            f"• <b>Total Users:</b> <code>{total_users}</code>\n"
+            f"• <b>Format:</b> Plain Text File (.txt)\n\n"
+            f"<i>Contains user IDs, usernames, display names, ban statuses, message counts, and timestamps!</i>"
+        ),
+        parse_mode="HTML"
+    )
+
+async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Owner command to ban a user by ID permanently or for specified days."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    if not is_owner(user.id):
+        await update.message.reply_text("🚫 Only the bot owner can use this command!")
+        return
+
+    args = context.args or []
+    if not args or not args[0].isdigit():
+        await update.message.reply_text(
+            "⚠️ Usage: <code>/ban &lt;user_id&gt; [days]</code>\n"
+            "• Permanent Ban: <code>/ban 12345678</code>\n"
+            "• Temporary Ban: <code>/ban 12345678 7</code> (Bans for 7 days)",
+            parse_mode='HTML'
+        )
+        return
+
+    target_id = int(args[0])
+    if is_owner(target_id):
+        await update.message.reply_text("❌ You cannot ban the bot owner!", parse_mode='HTML')
+        return
+
+    days = int(args[1]) if len(args) > 1 and args[1].isdigit() else 0
+    now = time.time()
+    banned_until = now + (days * 86400) if days > 0 else 0.0
+
+    target_str = str(target_id)
+    if target_str not in users_db:
+        users_db[target_str] = {
+            "id": target_id,
+            "username": "",
+            "first_name": f"User {target_id}",
+            "last_name": "",
+            "is_bot": False,
+            "first_seen": now,
+            "last_seen": now,
+            "message_count": 0
+        }
+
+    u = users_db[target_str]
+    u["is_banned"] = True
+    u["banned_until"] = banned_until
+    save_users_data(users_db)
+
+    duration_str = f"for {days} Days" if days > 0 else "PERMANENTLY"
+    target_name = escape_html(u.get("first_name", f"User {target_id}"))
+    target_handle = f"@{u.get('username')}" if u.get("username") else target_name
+
+    send_telegram_log(
+        f"🚫 <b>USER BANNED BY OWNER</b>\n"
+        f"👤 <b>Target:</b> {target_handle} (ID: <code>{target_id}</code>)\n"
+        f"⏳ <b>Duration:</b> {duration_str}"
+    )
+
     await update.message.reply_text(
-        f"👥 <b>Collected Users Database Summary:</b>\n"
-        f"• <b>Total Tracked Users:</b> <code>{total_users}</code>\n\n"
-        f"🏆 <b>Top Active Users:</b>\n{top_str}",
+        f"🚫 <b>USER BANNED SUCCESSFULLY!</b>\n\n"
+        f"👤 <b>User:</b> {target_handle}\n"
+        f"🆔 <b>ID:</b> <code>{target_id}</code>\n"
+        f"⏳ <b>Duration:</b> <code>{duration_str}</code>",
+        parse_mode='HTML'
+    )
+
+async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Owner command to unban a user by ID."""
+    if not update.message or not update.message.from_user:
+        return
+
+    user = update.message.from_user
+    if not is_owner(user.id):
+        await update.message.reply_text("🚫 Only the bot owner can use this command!")
+        return
+
+    args = context.args or []
+    if not args or not args[0].isdigit():
+        await update.message.reply_text("⚠️ Usage: <code>/unban &lt;user_id&gt;</code> (e.g. <code>/unban 12345678</code>)", parse_mode='HTML')
+        return
+
+    target_id = int(args[0])
+    target_str = str(target_id)
+
+    if target_str in users_db:
+        u = users_db[target_str]
+        u["is_banned"] = False
+        u["banned_until"] = 0.0
+        save_users_data(users_db)
+        target_name = escape_html(u.get("first_name", f"User {target_id}"))
+    else:
+        target_name = f"User {target_id}"
+
+    send_telegram_log(
+        f"✅ <b>USER UNBANNED BY OWNER</b>\n"
+        f"👤 <b>Target ID:</b> <code>{target_id}</code>"
+    )
+
+    await update.message.reply_text(
+        f"✅ <b>USER UNBANNED SUCCESSFULLY!</b>\n\n"
+        f"👤 <b>User:</b> {target_name}\n"
+        f"🆔 <b>ID:</b> <code>{target_id}</code>",
         parse_mode='HTML'
     )
 
@@ -7113,6 +7312,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if user:
         track_user_data(user)
 
+        # Check Ban Status
+        banned, ban_msg = is_user_banned(user.id)
+        if banned:
+            if user_text.startswith('/'):
+                await message.reply_text(f"🚫 <b>ACCESS DENIED!</b>\n\n{ban_msg}", parse_mode='HTML')
+            return
+
     # Check if owner is in wizard step 'awaiting_name' for /addcard
     if user and is_owner(user.id) and user.id in owner_addcard_sessions:
         session = owner_addcard_sessions[user.id]
@@ -7214,6 +7420,51 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
             return
 
+    # Track message counter for 100-message auto drop in group chats
+    if chat_type in ['group', 'supergroup'] and cards_pool_db:
+        chat_id = message.chat.id
+        group_message_counts[chat_id] = group_message_counts.get(chat_id, 0) + 1
+        if group_message_counts[chat_id] >= 100:
+            now_time = time.time()
+            existing_drop = active_drops.get(chat_id)
+            if not existing_drop or (now_time - existing_drop.get("summoned_at", 0.0) > 600):
+                group_message_counts[chat_id] = 0
+                dropped_tier = roll_card_tier()
+                matching_pool = [c for c in cards_pool_db if c.get("tier", "").lower() == dropped_tier.lower()]
+
+                if matching_pool:
+                    base_card = random.choice(matching_pool)
+                else:
+                    base_card = random.choice(cards_pool_db)
+
+                c_name = base_card.get("name", "Cultivator")
+                dropped_tier = base_card.get("tier", "Mortal")
+                c_photo = base_card.get("photo", "")
+
+                active_drops[chat_id] = {
+                    "name": c_name,
+                    "tier": dropped_tier,
+                    "photo": c_photo,
+                    "worth": TIER_WORTH.get(dropped_tier, 200),
+                    "code": base_card.get("code"),
+                    "summoned_at": now_time
+                }
+
+                symbol = TIER_SYMBOLS.get(dropped_tier, "⚪️")
+                c_name_esc = escape_html(c_name)
+
+                drop_msg = (
+                    f"A {dropped_tier} {symbol} recruit {c_name_esc} has appeared...\n\n"
+                    f"Use /recruit to bring them into your crew"
+                )
+                try:
+                    if c_photo:
+                        await message.reply_photo(photo=c_photo, caption=drop_msg)
+                    else:
+                        await message.reply_text(drop_msg)
+                except Exception:
+                    pass
+
     base_text = user_text.lower().strip().split('@')[0]
     bot_uname = context.bot.username.lower() if (context.bot and context.bot.username) else ""
     is_web_cmd = base_text in ["/web", "web"]
@@ -7313,6 +7564,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # ==================== PRIVATE CHAT HANDLING ====================
     if chat_type == 'private':
+        if user:
+            u_info = users_db.get(str(user.id), {})
+            if not u_info.get("has_started_dm"):
+                u_info["has_started_dm"] = True
+                save_users_data(users_db)
+
         user_id = user.id if user else 0
         user_is_owner = is_owner(user_id)
         role_label = " (Owner)" if user_is_owner else ""
@@ -7832,6 +8089,8 @@ def main():
     app.add_handler(CommandHandler("listapi", listapi_command))
     app.add_handler(CommandHandler("statsgc", statsgc_command))
     app.add_handler(CommandHandler("allusers", allusers_command))
+    app.add_handler(CommandHandler("ban", ban_command))
+    app.add_handler(CommandHandler("unban", unban_command))
     app.add_handler(CommandHandler("mongoexport", mongoexport_command))
     app.add_handler(CommandHandler("mongoimport", mongoimport_command))
     app.add_handler(CommandHandler(["minfo", "mongoinfo"], minfo_command))
