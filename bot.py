@@ -834,6 +834,11 @@ def get_user_tag(user) -> str:
         return f"@{user.username}"
     return user.first_name or "Bhai"
 
+def is_owner(user_id: int) -> bool:
+    if OWNER_ID == 0:
+        return False
+    return user_id == OWNER_ID
+
 def is_user_banned(user_id: int) -> Tuple[bool, str]:
     if is_owner(user_id):
         return False, ""  # Owner cannot be banned
