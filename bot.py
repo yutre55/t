@@ -5839,7 +5839,7 @@ async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await message.reply_text(text, parse_mode='HTML')
 
 async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Claims a card dropped via /summon or 100-msg group drop."""
+    """Claims a card dropped via /summon or 100-msg group drop, requiring character name match."""
     if not update.message or not update.message.from_user:
         return
 
@@ -5857,8 +5857,33 @@ async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     summoned_at = dropped.get("summoned_at", 0.0)
     if summoned_at > 0 and (now - summoned_at > 600):
         active_drops.pop(chat_id, None)
+        await update.message.reply_text("❌ The recruit has walked off!", parse_mode='HTML')
+        return
+
+    args = context.args or []
+    if not args:
         await update.message.reply_text(
-            "⏳ <b>The recruit waited for 10 minutes and walked off!</b> Use <code>/summon</code> to find another recruit.",
+            "⚠️ Usage: <code>/recruit &lt;character_name&gt;</code> (e.g. <code>/recruit yeom</code>)",
+            parse_mode='HTML'
+        )
+        return
+
+    query_name = " ".join(args).strip().lower()
+    actual_name = dropped.get("name", "").strip().lower()
+
+    name_parts = actual_name.split()
+    matched = False
+    if query_name in actual_name:
+        matched = True
+    else:
+        for part in name_parts:
+            if query_name in part or part in query_name:
+                matched = True
+                break
+
+    if not matched:
+        await update.message.reply_text(
+            f"❌ <b>Incorrect character name!</b> The active recruit is not <code>{escape_html(' '.join(args))}</code>.",
             parse_mode='HTML'
         )
         return
@@ -7267,38 +7292,42 @@ async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await message.reply_text(text, parse_mode='HTML')
 
 BOT_COMMANDS_KNOWLEDGE = """
-[Bot Features & Commands Reference Manual for Sylvi]:
-1. Cultivation Anime Card System:
-   • /summon - Group chat mein random recruit drop summon karne ke liye .
-   • /claim, /recruit, /grab - Drop hui card ko apne crew mein claim karne ke liye.
-   • /mycards, /roster - Apne owned cards, pagination, tier filters (<24h expiring filter) ke sath dekhne ke liye.
-   • /showcard <code> - Specific card ki details (Name, Tier, Worth, Stay Time - no code shown) dekhne ke liye.
-   • /discard <code> - Card discard karke uski worth ke barabar Spirit Stones (SS) pane ke liye.
-   • /allcards - Global card pool mein available saari cards dekhne ke liye.
-   • /daily - Roz ke 500 Spirit Stones (SS) + 1 free Mortal card claim karne ke liye.
-   • /pillshop - Card ka stay time badhane ke liye pills kharidne ka shop.
-   • /buy <pill> [qty] - Pills buy karne ke liye (e.g. /buy qi 2, /buy eternal).
-   • /inventory - Apne Spirit Stones (SS) balance aur pills stock check karne ke liye.
-   • /cultivate <code> <pill> - Card ko pill khilane ke liye taaki uska stay time extend ho ya permanent ho jaye.
-   • /offer <code> <price_ss> - Apne card ko doosre user ko Spirit Stones ke badle sell/offer par lagane ke liye. (SELLING COMMAND!)
-   • /buyoffer <offer_id> - Offer ki gayi card ko buy karne ke liye.
-   • /swap <my_code> <their_code> - Same tier ki cards ko aapas mein swap karne ke liye.
-   • /myprofile, /profile - Apna game completion %, unique cards collected, aur tier progress profile dekhne ke liye.
-   • /leaderboard, /lb - Sabse zyada Spirit Stones (SS) wale top players ka leaderboard dekhne ke liye.
-   • /web - Telegram Mini App open karne ke liye interactive web app button.
-   • /mine <bet_ss> <mines_count> - Spirit Stones bet karke Mines betting game khelne ke liye (min bet 50 SS).
-2. General & Game Commands:
-   • /status - Bot ka system health, uptime, database status, aur active game stats dekhne ke liye.
-   • /help, /start - Help menu dekhne ke liye.
-   • /4words - 4-letter word guessing game khelne ke liye.
-   • /statsgc - Group chat message stats aur memory info ke liye.
-3. Owner Commands:
-   • /addcard <tier> <name> - Global pool mein nayi card add karne ke liye (photo ke sath).
-   • /addapi <key> - Nayi Groq AI API key dynamically add karne ke liye.
-   • /listapi - Active Groq AI keys ka status dekhne ke liye.
-   • /allusers - Tracked users database summary ke liye.
-   • /mongoexport & /mongoimport - MongoDB backup export/import ke liye.
-   • /removecard <pool_id_or_name> - Global database pool se card permanently delete karne ke liye.
+[Sylvi AI Knowledge Base - Complete Bot Commands & How-To Manual]:
+Aapka naam Sylvi hai. Jab bhi koi user kisi bhi command, game, pill, card, ya feature ke baare mein puche (jaise '/summon kaise karein', '/mine kaise khele', '/sendss kya hai', '/cultivate kaise use karein', etc.), toh unhe politely, clearly, aur natural Hinglish mein samjhao ki woh command kaise kaam karti hai aur use kaise use karna hai!
+
+1. Anime Card System & Commands:
+   • /summon: Group chat mein card drop summon karne ke liye. Note: Ek baar mein 1 drop active reh sakta hai (10 min tak, phir walk-off ho jata hai). Group 1-min aur user 60-min cooldown.
+   • /recruit, /claim, /grab: Group chat mein active dropped card ko apne crew mein claim karne ke liye.
+   • /mycards, /roster: Apne owned cards, stay limits, aur favorite card image dekhne ke liye (3-column grid format).
+   • /favcard <code_or_name>: Apne roster se favorite card set karne ke liye, jo /mycards aur Mini App header mein dikhta hai.
+   • /scard <code>, /showcard <code>: Card ke details (Name, Tier, Worth in SS, Stay Time) dekhne ke liye.
+   • /discard <code>: Card ko discard karke uski worth ke barabar Spirit Stones (SS) paane ke liye.
+   • /search <name>: Global card pool mein kisi card ko dhoondne aur unke owners dekhne ke liye.
+   • /allcards: Global card pool ki sabhi available base cards dekhne ke liye.
+   • /daily: Roz ke +500 Spirit Stones (SS) + 1 Bonus Mortal card claim karne ke liye (24h cooldown).
+   • /pillshop: Pills dukaan kholne ke liye jisse cards ka stay time badhaya ja sake.
+   • /buy <pill> [qty]: Pills buy karne ke liye (e.g., /buy qi 2, /buy eternal).
+   • /inventory: Apne Spirit Stones balance aur owned pills stock check karne ke liye.
+   • /cultivate <code> <pill>: Card ko pill khilakar uska stay duration extend karne ke liye (Eternal Life Pill se card Permanent ♾️ ho jati hai!).
+   • /sendss <amount>: Group chat mein kisi user ke message par reply karke unhe Spirit Stones bhejne ke liye (5,000 SS daily sending limit).
+   • /offer <code_or_name> <price_ss>: Apne card ko Market par Spirit Stones ke badle sell karne ke liye.
+   • /buyoffer <offer_id>: Market par offer ki gayi card ko buy karne ke liye.
+   • /swap <your_code> <their_code>: Same tier ki cards ko dusre player ke sath swap/trade karne ke liye.
+   • /myprofile, /profile: Apna game completion %, total collected cards, aur tier progress dekhein.
+   • /leaderboard, /lb: Sabse zyada Spirit Stones wale top players ka leaderboard.
+   • /web: Telegram Mini App open karne ke liye interactive button (https://t-xcem.onrender.com).
+
+2. Spiritual Games & General Commands:
+   • /mine <bet_ss> <mines_count>: Spiritual Mines betting game (Bet min 50 SS, 1-24 mines). Safe diamonds uncover karke multiplier badhao! (5-min timeout).
+   • /join4 [bet]: Connect 4 board game. Free play vs Bot (+100 SS reward, 2,000 SS daily bot earnings cap) ya reply karke PvP challenge (+betting SS, draw par full refund).
+   • /4words: 4-letter English word guessing game (30 attempts + hints). Win par +100 SS.
+   • /status: Bot operational status, database health, uptime, aur game stats.
+   • /start: Welcome message aur quick guide.
+   • /help: User commands menu.
+   • /ohelp: Owner commands menu (Owner only).
+
+3. Mandatory Rules & Access:
+   • User must start bot in private DM first and join official channel @Murim_recruit (https://t.me/Murim_recruit) before using /summon and game commands!
 """
 
 # ==================== MAIN MESSAGE HANDLER ====================
